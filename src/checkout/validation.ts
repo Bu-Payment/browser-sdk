@@ -122,22 +122,35 @@ function parseModal(object: JsonObject): ModalPresentation {
   if (!Number.isSafeInteger(configuration.amount) || Number(configuration.amount) < 1) {
     throw new TypeError("Modal amount is invalid");
   }
+  const sessionToken = asString(configuration.sessionToken, "sessionToken");
+  const reference = asString(configuration.reference, "reference");
+  if (!sessionToken || sessionToken.length > 4096 || !reference || reference.length > 255) {
+    throw new TypeError("Modal configuration is invalid");
+  }
   const currency = asString(configuration.currency, "currency");
   if (!/^[A-Z]{3}$/.test(currency)) throw new TypeError("Modal currency is invalid");
   const callback = asObject(object.callback, "Modal callback");
   assertExactKeys(callback, ["url", "token"], "Modal callback");
+  const callbackUrl = asString(callback.url, "callback.url");
+  const callbackToken = asString(callback.token, "token");
+  if (!/^\/public\/v1\/checkouts\/[A-Za-z0-9_-]+\/callback$/.test(callbackUrl)) {
+    throw new TypeError("Modal callback URL is invalid");
+  }
+  if (!callbackToken || callbackToken.length > 4096) {
+    throw new TypeError("Modal callback token is invalid");
+  }
   return {
     kind: "modal",
     script: { url: script.url },
     configuration: {
-      sessionToken: asString(configuration.sessionToken, "sessionToken"),
+      sessionToken,
       amount: Number(configuration.amount),
       currency,
-      reference: asString(configuration.reference, "reference"),
+      reference,
     },
     callback: {
-      url: asString(callback.url, "callback.url"),
-      token: asString(callback.token, "token"),
+      url: callbackUrl,
+      token: callbackToken,
     },
   };
 }

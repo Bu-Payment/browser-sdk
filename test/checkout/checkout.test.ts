@@ -169,4 +169,36 @@ describe("public checkout", () => {
     expect(checkout.presentation.kind).toBe("modal");
     expect(() => client.checkout.redirect(checkout)).toThrow(/not a redirect/);
   });
+
+  it("fails closed when modal callback data does not match the API contract", async () => {
+    const invalidModal = {
+      ...created,
+      checkoutUrl: undefined,
+      presentation: {
+        kind: "modal",
+        script: { url: "https://payment.tmtprotects.com/tmt-payment-modal.3.6.1.js" },
+        configuration: {
+          sessionToken: "opaque",
+          amount: 1200,
+          currency: "EUR",
+          reference: "bup_co_test_modal",
+        },
+        callback: { url: "https://attacker.example/callback", token: "opaque" },
+      },
+    };
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch: createFetch(invalidModal),
+    });
+
+    await expect(
+      client.checkout.create({
+        priceId: "price_1",
+        email: "buyer@example.com",
+        quantity: 1,
+        destinationKey: "default",
+      }),
+    ).rejects.toThrow(/callback URL/);
+  });
 });
