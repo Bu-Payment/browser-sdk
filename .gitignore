@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+*.tgz
+.DS_Store
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.superpowers/
+docs/superpowers/
+.graphify/
+docs/graphify/
+*.graphify.*
