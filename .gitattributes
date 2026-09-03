@@ -1,0 +1,11 @@
+/.github export-ignore
+/test export-ignore
+/scripts export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore
+/biome.json export-ignore
+/tsconfig.json export-ignore
+/tsup.config.ts export-ignore
+/vitest.config.ts export-ignore
+AGENTS.md export-ignore
+package-lock.json export-ignore
