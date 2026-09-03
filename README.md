@@ -9,7 +9,7 @@ this client.
 ## Install
 
 ```sh
-npm install @bu-payment/browser-sdk
+bun add @bu-payment/browser-sdk
 ```
 
 The package is ESM-only, has no runtime dependencies, and targets modern browsers with Fetch,

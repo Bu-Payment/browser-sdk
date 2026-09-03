@@ -4,17 +4,22 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
-execFileSync("npm", ["run", "build"], { cwd: projectRoot, stdio: "inherit" });
+execFileSync("bun", ["run", "build"], { cwd: projectRoot, stdio: "inherit" });
 
 const consumerRoot = mkdtempSync(join(tmpdir(), "bu-payment-browser-sdk-consumer-"));
-const npmEnvironment = { ...process.env, npm_config_cache: join(consumerRoot, ".npm-cache") };
-const packOutput = execFileSync("npm", ["pack", "--json", "--pack-destination", consumerRoot], {
+const archiveName = "bu-payment-browser-sdk.tgz";
+const archivePath = join(consumerRoot, archiveName);
+const bunEnvironment = { ...process.env, BUN_INSTALL_CACHE_DIR: join(consumerRoot, ".bun-cache") };
+execFileSync("bun", ["pm", "pack", "--filename", archivePath, "--quiet"], {
   cwd: projectRoot,
-  encoding: "utf8",
-  env: npmEnvironment,
+  stdio: "inherit",
+  env: bunEnvironment,
 });
-const [{ filename, files }] = JSON.parse(packOutput);
-const publishedPaths = files.map((file) => file.path).sort();
+const publishedPaths = execFileSync("tar", ["-tzf", archivePath], { encoding: "utf8" })
+  .trim()
+  .split("\n")
+  .map((path) => path.replace(/^package\//, ""))
+  .sort();
 const allowed = [
   "README.md",
   "dist/index.d.ts",
@@ -30,10 +35,10 @@ writeFileSync(
   join(consumerRoot, "package.json"),
   JSON.stringify({ name: "installed-consumer", private: true, type: "module" }),
 );
-execFileSync("npm", ["install", "--ignore-scripts", join(consumerRoot, filename)], {
+execFileSync("bun", ["add", "--ignore-scripts", archivePath], {
   cwd: consumerRoot,
   stdio: "inherit",
-  env: npmEnvironment,
+  env: bunEnvironment,
 });
 
 writeFileSync(
@@ -43,7 +48,7 @@ if (typeof createBuPaymentClient !== "function") throw new Error("Missing client
 if (!(new SessionInvalidError("invalid", { code: "application_session_invalid", status: 401 }) instanceof Error)) throw new Error("Invalid error export");
 `,
 );
-execFileSync(process.execPath, [join(consumerRoot, "consumer.mjs")], {
+execFileSync("bun", [join(consumerRoot, "consumer.mjs")], {
   cwd: consumerRoot,
   stdio: "inherit",
 });
@@ -57,11 +62,11 @@ void client.catalogue.listProducts({ limit: 10 });
 void status;
 `,
 );
-const typeScript = join(projectRoot, "node_modules", "typescript", "bin", "tsc");
 execFileSync(
-  process.execPath,
+  "bun",
   [
-    typeScript,
+    "x",
+    "tsc",
     "--noEmit",
     "--strict",
     "--skipLibCheck",
