@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Catalogue product reads now compose the canonical product and price endpoints without N+1
+  requests; metadata-only builders no longer send the unsupported `include` query parameter.
 - Network failures now reject with `ErrorCode.NETWORK_UNAVAILABLE` and retain the browser error as
   `cause`; request cancellation remains distinct and uses `ErrorCode.OPERATION_CANCELLED`.
 - Card saving now uses an immutable, type-state builder ending in `start()` plus root `resume()` and

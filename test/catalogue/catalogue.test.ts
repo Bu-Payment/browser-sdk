@@ -7,70 +7,20 @@ import type {
   ProductWithPrices,
 } from "../../src/catalogue/types";
 import { createBuPaymentClient } from "../../src/client";
-
-const session = {
-  token: "session",
-  expiresAt: "2026-09-03T12:10:00.000Z",
-  renewAfter: "2026-09-03T12:08:00.000Z",
-  capabilities: ["catalogue:read", "checkout:create"],
-};
+import { price, catalogueSession as session } from "./fixtures";
 
 describe("public catalogue", () => {
-  it("lists products with embedded prices in one catalogue request", async () => {
-    const requestedUrls: URL[] = [];
-    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
-      const url = new URL(String(input));
-      if (url.pathname.endsWith("/application-sessions")) return Response.json(session);
-      requestedUrls.push(url);
-      return Response.json({
-        data: [
-          {
-            id: "prod_1",
-            name: "Starter",
-            description: null,
-            prices: [
-              {
-                id: "price_1",
-                productId: "prod_1",
-                unitAmount: 1200,
-                currency: "EUR",
-                type: "one_time",
-                recurring: null,
-                description: null,
-                lookupKey: "starter",
-              },
-            ],
-          },
-        ],
-        nextCursor: null,
-      });
-    });
-    const client = createBuPaymentClient({
-      publishableKey: "bup_pk_test_sample",
-      apiBaseUrl: "https://api.example.test",
-      fetch,
-    });
-
-    const page = await client.catalogue.list().limit(25).get();
-
-    expect(page.products[0]?.prices[0]?.unitAmount).toBe(1200);
-    expect(page.pagination.nextCursor).toBeNull();
-    expect(requestedUrls).toHaveLength(1);
-    expect(requestedUrls[0]?.pathname).toMatch(/\/catalogue\/products$/);
-    expect(requestedUrls[0]?.searchParams.get("limit")).toBe("25");
-  });
-
   it("omits prices without mutating the original builder", async () => {
     const requestedUrls: URL[] = [];
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith("/application-sessions")) return Response.json(session);
       requestedUrls.push(url);
+      if (url.pathname.endsWith("/catalogue/prices")) {
+        return Response.json({ data: [], nextCursor: null });
+      }
       const product = { id: "prod_1", name: "Starter", description: null };
-      return Response.json({
-        data: url.searchParams.has("include") ? [product] : [{ ...product, prices: [] }],
-        nextCursor: null,
-      });
+      return Response.json({ data: [product], nextCursor: null });
     });
     const client = createBuPaymentClient({
       publishableKey: "bup_pk_test_sample",
@@ -86,11 +36,10 @@ describe("public catalogue", () => {
 
     expect(withPrices.products[0]).toHaveProperty("prices");
     expect(withoutPrices.products[0]).not.toHaveProperty("prices");
-    const withPricesUrl = requestedUrls.find((url) => !url.searchParams.has("include"));
+    expect(requestedUrls.every((url) => !url.searchParams.has("include"))).toBe(true);
     const withoutPricesUrl = requestedUrls.find(
-      (url) => url.searchParams.get("include") === "none",
+      (url) => url.pathname.endsWith("/catalogue/products") && url.searchParams.has("cursor"),
     );
-    expect(withPricesUrl).toBeDefined();
     expect(withoutPricesUrl?.searchParams.get("limit")).toBe("10");
     expect(withoutPricesUrl?.searchParams.get("cursor")).toBe("opaque+/=");
   });
@@ -136,16 +85,18 @@ describe("public catalogue", () => {
   });
 
   it("gets one assigned product by encoded identifier", async () => {
+    const requestedUrls: URL[] = [];
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith("/application-sessions")) return Response.json(session);
-      expect(url.pathname.endsWith("/catalogue/products/product%2Fone")).toBe(true);
-      return Response.json({
-        id: "product/one",
-        name: "One",
-        description: "Public",
-        prices: [],
-      });
+      requestedUrls.push(url);
+      if (url.pathname.endsWith("/catalogue/prices")) {
+        return Response.json({
+          data: [price({ id: "price_1", productId: "product/one", unitAmount: 1200 })],
+          nextCursor: null,
+        });
+      }
+      return Response.json({ id: "product/one", name: "One", description: "Public" });
     });
     const client = createBuPaymentClient({
       publishableKey: "bup_pk_test_sample",
@@ -153,9 +104,17 @@ describe("public catalogue", () => {
       fetch,
     });
 
-    await expect(client.catalogue.product("product/one").get()).resolves.toMatchObject({
+    await expect(client.catalogue.product("product/one").get()).resolves.toEqual({
+      id: "product/one",
       name: "One",
+      description: "Public",
+      prices: [price({ id: "price_1", productId: "product/one", unitAmount: 1200 })],
     });
+    expect(requestedUrls[0]?.pathname.endsWith("/catalogue/products/product%2Fone")).toBe(true);
+    expect(requestedUrls[0]?.search).toBe("");
+    expect(requestedUrls[1]?.pathname.endsWith("/catalogue/prices")).toBe(true);
+    expect(requestedUrls[1]?.searchParams.get("productId")).toBe("product/one");
+    expect(requestedUrls[1]?.searchParams.get("limit")).toBe("100");
   });
 
   it("validates recurring price responses at runtime", async () => {
@@ -213,7 +172,7 @@ describe("public catalogue", () => {
     });
     expect(base).not.toBe(metadata);
     expect(Object.isFrozen(base)).toBe(true);
-    expect(requestedUrls[0]?.searchParams.get("include")).toBe("none");
+    expect(requestedUrls[0]?.search).toBe("");
   });
 
   it("exposes only catalogue builders", () => {

@@ -1,13 +1,7 @@
 import { ErrorCode } from "../constants";
 import type { HttpClient } from "../core/http";
-import {
-  asNullableString,
-  asObject,
-  asString,
-  assertExactKeys,
-  type JsonObject,
-} from "../core/validation";
 import { toBuPaymentError } from "../errors";
+import { catalogueResponse, parsePage, parsePrice, parseProduct } from "./response";
 import type {
   CataloguePage,
   CatalogueProductPage,
@@ -56,33 +50,45 @@ export interface CatalogueClient {
 
 export function createCatalogueClient(http: HttpClient): CatalogueClient {
   return Object.freeze({
-    list: () => createCatalogueListBuilder(http, {}, parseProductWithPrices, true),
+    list: () => createCatalogueListBuilder(http, {}, includeProductPrices),
     product: (productId: string) =>
-      createCatalogueProductBuilder(http, productId, undefined, parseProductWithPrices, true),
+      createCatalogueProductBuilder(http, productId, undefined, includeSingleProductPrices),
     prices: () => createCataloguePricesBuilder(http, {}),
   });
 }
 
+type ProductPageResolver<TProduct extends Product> = (
+  http: HttpClient,
+  products: Product[],
+  signal?: AbortSignal,
+) => Promise<TProduct[]>;
+
+type ProductResolver<TProduct extends Product> = (
+  http: HttpClient,
+  product: Product,
+  signal?: AbortSignal,
+) => Promise<TProduct>;
+
 function createCatalogueListBuilder<TProduct extends Product>(
   http: HttpClient,
   options: Readonly<ListOptions>,
-  parseItem: (value: unknown) => TProduct,
-  includePrices: boolean,
+  resolveProducts: ProductPageResolver<TProduct>,
 ): CatalogueListBuilder<TProduct> {
   const next = (nextOptions: Readonly<ListOptions>) =>
-    createCatalogueListBuilder(http, nextOptions, parseItem, includePrices);
+    createCatalogueListBuilder(http, nextOptions, resolveProducts);
   return Object.freeze({
     cursor: (cursor: string) => next({ ...options, cursor }),
     limit: (limit: number) => next({ ...options, limit }),
     signal: (signal: AbortSignal) => next({ ...options, signal }),
-    withoutPrices: () => createCatalogueListBuilder(http, options, parseProduct, false),
+    withoutPrices: () => createCatalogueListBuilder(http, options, resolveProductMetadataPage),
     get: async () => {
-      const query = catalogueInput(() => buildListQuery(options, undefined, includePrices));
+      const query = catalogueInput(() => buildListQuery(options));
       const value = await http.request(`public/v1/catalogue/products${query}`, {
         ...(options.signal ? { signal: options.signal } : {}),
       });
-      const page = catalogueResponse(() => parsePage(value, parseItem));
-      return { products: page.data, pagination: { nextCursor: page.nextCursor } };
+      const page = catalogueResponse(() => parsePage(value, parseProduct));
+      const products = await resolveProducts(http, page.data, options.signal);
+      return { products, pagination: { nextCursor: page.nextCursor } };
     },
   });
 }
@@ -91,14 +97,13 @@ function createCatalogueProductBuilder<TProduct extends Product>(
   http: HttpClient,
   productId: string,
   signal: AbortSignal | undefined,
-  parseItem: (value: unknown) => TProduct,
-  includePrices: boolean,
+  resolveProduct: ProductResolver<TProduct>,
 ): CatalogueProductBuilder<TProduct> {
   return Object.freeze({
     signal: (nextSignal: AbortSignal) =>
-      createCatalogueProductBuilder(http, productId, nextSignal, parseItem, includePrices),
+      createCatalogueProductBuilder(http, productId, nextSignal, resolveProduct),
     withoutPrices: () =>
-      createCatalogueProductBuilder(http, productId, signal, parseProduct, false),
+      createCatalogueProductBuilder(http, productId, signal, resolveProductMetadata),
     get: async () => {
       if (!productId.trim()) {
         throw toBuPaymentError(
@@ -107,12 +112,12 @@ function createCatalogueProductBuilder<TProduct extends Product>(
           "Catalogue input is invalid",
         );
       }
-      const query = includePrices ? "" : "?include=none";
       const value = await http.request(
-        `public/v1/catalogue/products/${encodeURIComponent(productId)}${query}`,
+        `public/v1/catalogue/products/${encodeURIComponent(productId)}`,
         signal ? { signal } : {},
       );
-      return catalogueResponse(() => parseItem(value));
+      const product = catalogueResponse(() => parseProduct(value));
+      return resolveProduct(http, product, signal);
     },
   });
 }
@@ -146,15 +151,7 @@ function catalogueInput<T>(operation: () => T): T {
   }
 }
 
-function catalogueResponse<T>(operation: () => T): T {
-  try {
-    return operation();
-  } catch (error) {
-    throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Catalogue response is invalid");
-  }
-}
-
-function buildListQuery(options: ListOptions, productId?: string, includePrices?: boolean): string {
+function buildListQuery(options: ListOptions, productId?: string): string {
   if (
     options.limit !== undefined &&
     (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
@@ -171,83 +168,64 @@ function buildListQuery(options: ListOptions, productId?: string, includePrices?
     if (!productId.trim()) throw new TypeError("productId must not be empty");
     query.set("productId", productId);
   }
-  if (includePrices === false) query.set("include", "none");
   const value = query.toString();
   return value ? `?${value}` : "";
 }
 
-function parsePage<T>(value: unknown, parseItem: (value: unknown) => T): CataloguePage<T> {
-  const object = asObject(value, "Catalogue page");
-  assertExactKeys(object, ["data", "nextCursor"], "Catalogue page");
-  if (!Array.isArray(object.data)) throw new TypeError("Catalogue data must be an array");
-  if (object.nextCursor !== null && typeof object.nextCursor !== "string") {
-    throw new TypeError("Catalogue nextCursor must be a string or null");
-  }
-  return { data: object.data.map(parseItem), nextCursor: object.nextCursor as string | null };
+async function resolveProductMetadataPage(_http: HttpClient, products: Product[]) {
+  return products;
 }
 
-function parseProduct(value: unknown): Product {
-  const object = asObject(value, "Product");
-  assertExactKeys(object, ["id", "name", "description"], "Product");
-  return {
-    id: asString(object.id, "id"),
-    name: asString(object.name, "name"),
-    description: asNullableString(object.description, "description"),
-  };
+async function resolveProductMetadata(_http: HttpClient, product: Product) {
+  return product;
 }
 
-function parseProductWithPrices(value: unknown): ProductWithPrices {
-  const object = asObject(value, "Product");
-  assertExactKeys(object, ["id", "name", "description", "prices"], "Product");
-  if (!Array.isArray(object.prices)) throw new TypeError("Product prices must be an array");
-  return {
-    id: asString(object.id, "id"),
-    name: asString(object.name, "name"),
-    description: asNullableString(object.description, "description"),
-    prices: object.prices.map(parsePrice),
-  };
+async function includeProductPrices(
+  http: HttpClient,
+  products: Product[],
+  signal?: AbortSignal,
+): Promise<ProductWithPrices[]> {
+  if (products.length === 0) return [];
+  const productIds = new Set(products.map(({ id }) => id));
+  const pricesByProduct = new Map<string, Price[]>();
+  for (const price of await listAllPrices(http, signal)) {
+    if (!productIds.has(price.productId)) continue;
+    const prices = pricesByProduct.get(price.productId) ?? [];
+    prices.push(price);
+    pricesByProduct.set(price.productId, prices);
+  }
+  return products.map((product) => ({
+    ...product,
+    prices: pricesByProduct.get(product.id) ?? [],
+  }));
 }
 
-function parsePrice(value: unknown): Price {
-  const object = asObject(value, "Price");
-  assertExactKeys(
-    object,
-    ["id", "productId", "unitAmount", "currency", "type", "recurring", "description", "lookupKey"],
-    "Price",
-  );
-  const type = asString(object.type, "type");
-  if (type !== "one_time" && type !== "recurring") throw new TypeError("Price type is invalid");
-  if (!Number.isSafeInteger(object.unitAmount) || Number(object.unitAmount) < 0) {
-    throw new TypeError("unitAmount must be a non-negative safe integer");
-  }
-  const fields = {
-    id: asString(object.id, "id"),
-    productId: asString(object.productId, "productId"),
-    unitAmount: Number(object.unitAmount),
-    currency: asString(object.currency, "currency"),
-    description: asNullableString(object.description, "description"),
-    lookupKey: asNullableString(object.lookupKey, "lookupKey"),
-  };
-  if (type === "one_time") {
-    if (object.recurring !== null)
-      throw new TypeError("One-time price recurring value must be null");
-    return { ...fields, type, recurring: null };
-  }
-  return { ...fields, type, recurring: parseRecurring(object.recurring) };
+async function includeSingleProductPrices(
+  http: HttpClient,
+  product: Product,
+  signal?: AbortSignal,
+): Promise<ProductWithPrices> {
+  const prices = await listAllPrices(http, signal, product.id);
+  return { ...product, prices };
 }
 
-function parseRecurring(value: unknown): Extract<Price, { type: "recurring" }>["recurring"] {
-  const object: JsonObject = asObject(value, "Recurring price");
-  assertExactKeys(object, ["interval", "intervalCount"], "Recurring price");
-  const interval = asString(object.interval, "interval");
-  if (!["day", "week", "month", "year"].includes(interval)) {
-    throw new TypeError("Recurring interval is invalid");
-  }
-  if (!Number.isSafeInteger(object.intervalCount) || Number(object.intervalCount) < 1) {
-    throw new TypeError("intervalCount must be a positive safe integer");
-  }
-  return {
-    interval: interval as "day" | "week" | "month" | "year",
-    intervalCount: Number(object.intervalCount),
-  };
+async function listAllPrices(
+  http: HttpClient,
+  signal?: AbortSignal,
+  productId?: string,
+): Promise<Price[]> {
+  const prices: Price[] = [];
+  let cursor: string | undefined;
+  do {
+    const query = catalogueInput(() =>
+      buildListQuery({ limit: 100, ...(cursor ? { cursor } : {}) }, productId),
+    );
+    const value = await http.request(`public/v1/catalogue/prices${query}`, {
+      ...(signal ? { signal } : {}),
+    });
+    const page = catalogueResponse(() => parsePage(value, parsePrice));
+    prices.push(...page.data);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return prices;
 }
