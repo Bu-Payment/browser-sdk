@@ -1,3 +1,5 @@
+import { isAbortError } from "../errors";
+
 export interface RetryContext {
   method: string;
   hasIdempotencyKey: boolean;
@@ -54,7 +56,7 @@ function retryDelay(response: Response, fallback: number): number {
 }
 
 function isAbort(error: unknown, signal?: AbortSignal): boolean {
-  return signal?.aborted === true || (error instanceof DOMException && error.name === "AbortError");
+  return signal?.aborted === true || isAbortError(error);
 }
 
 function wait(delayMs: number, signal?: AbortSignal): Promise<void> {

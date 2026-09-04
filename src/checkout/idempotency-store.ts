@@ -1,4 +1,4 @@
-import { OperationKind } from "../constants";
+import { ErrorCode, OperationKind } from "../constants";
 import type { ClientConfig } from "../core/config";
 import { BuPaymentError } from "../errors";
 import type { CreateCheckoutInput } from "./types";
@@ -51,9 +51,19 @@ async function execute<T>(
     safely(() => storage?.removeItem(storageKey));
     return result;
   } catch (error) {
-    if (error instanceof BuPaymentError) safely(() => storage?.removeItem(storageKey));
+    if (error instanceof BuPaymentError && !isAmbiguous(error)) {
+      safely(() => storage?.removeItem(storageKey));
+    }
     throw error;
   }
+}
+
+function isAmbiguous(error: BuPaymentError): boolean {
+  return (
+    error.code === ErrorCode.NETWORK_UNAVAILABLE ||
+    error.code === ErrorCode.OPERATION_CANCELLED ||
+    error.code === ErrorCode.OPERATION_TIMED_OUT
+  );
 }
 
 function readRecord(

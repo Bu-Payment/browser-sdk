@@ -1,7 +1,13 @@
 import { ErrorCode } from "../constants";
 import { apiUrl, type ClientConfig } from "../core/config";
 import { asObject, asString, assertExactKeys } from "../core/validation";
-import { BuPaymentError, errorFromResponse, toBuPaymentError } from "../errors";
+import {
+  BuPaymentError,
+  errorFromResponse,
+  jsonFromResponse,
+  requestError,
+  toBuPaymentError,
+} from "../errors";
 import type { BrowserApplicationSession, BrowserCapability } from "./types";
 
 interface SessionManagerOptions {
@@ -19,33 +25,39 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
   let session: BrowserApplicationSession | undefined;
   let pending: Promise<BrowserApplicationSession> | undefined;
 
+  async function fetchSession(path: string, init: RequestInit): Promise<Response> {
+    try {
+      return await options.fetch(apiUrl(options.config.apiBaseUrl, path), init);
+    } catch (error) {
+      throw requestError(error, init.signal ?? undefined);
+    }
+  }
+
   async function issue(signal?: AbortSignal): Promise<BrowserApplicationSession> {
-    const response = await options.fetch(
-      apiUrl(options.config.apiBaseUrl, "public/v1/application-sessions"),
-      {
-        method: "POST",
-        credentials: "omit",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ publishableKey: options.config.publishableKey }),
-        ...(signal ? { signal } : {}),
-      },
+    const response = await fetchSession("public/v1/application-sessions", {
+      method: "POST",
+      credentials: "omit",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publishableKey: options.config.publishableKey }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) throw await errorFromResponse(response, signal);
+    return parseSessionResponse(
+      await jsonFromResponse(response, "Application session response is invalid", signal),
     );
-    if (!response.ok) throw await errorFromResponse(response);
-    return parseSessionResponse(await response.json());
   }
 
   async function renew(current: BrowserApplicationSession, signal?: AbortSignal) {
-    const response = await options.fetch(
-      apiUrl(options.config.apiBaseUrl, "public/v1/application-sessions/renew"),
-      {
-        method: "POST",
-        credentials: "omit",
-        headers: { "Bu-Payment-Session": current.token },
-        ...(signal ? { signal } : {}),
-      },
+    const response = await fetchSession("public/v1/application-sessions/renew", {
+      method: "POST",
+      credentials: "omit",
+      headers: { "Bu-Payment-Session": current.token },
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) throw await errorFromResponse(response, signal);
+    return parseSessionResponse(
+      await jsonFromResponse(response, "Application session response is invalid", signal),
     );
-    if (!response.ok) throw await errorFromResponse(response);
-    return parseSessionResponse(await response.json());
   }
 
   async function refresh(signal?: AbortSignal): Promise<BrowserApplicationSession> {
@@ -71,7 +83,11 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       pending ??= refresh().finally(() => {
         pending = undefined;
       });
-      session = await waitForCaller(pending, signal);
+      try {
+        session = await waitForCaller(pending, signal);
+      } catch (error) {
+        throw requestError(error, signal);
+      }
       return session.token;
     },
     invalidate(token) {
