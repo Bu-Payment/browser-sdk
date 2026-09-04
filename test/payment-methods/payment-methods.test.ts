@@ -70,26 +70,13 @@ describe("payment method setups", () => {
         }),
       );
 
-    const result = await client(fetch).paymentMethods.getStatus("setup_opaque");
+    const result = await client(fetch).paymentMethods.reference("setup_opaque").status();
 
     expect(result.status).toBe("succeeded");
     expect(result.paymentMethod?.id).toBe("pm_public");
     expect(fetch.mock.calls[1]?.[0].toString()).toBe(
       "https://api.example.test/public/v1/payment-method-setups/setup_opaque",
     );
-  });
-
-  test("relays the opaque return query without parsing it", async () => {
-    const fetch = vi
-      .fn()
-      .mockResolvedValueOnce(json(session, 201))
-      .mockResolvedValueOnce(json(pendingSetup));
-    const returnQuery = "?transaction_id=untrusted&status=success&hash=untrusted";
-
-    const result = await client(fetch).paymentMethods.confirm("setup_opaque", returnQuery);
-
-    expect(result.status).toBe("requires_action");
-    expect(JSON.parse(fetch.mock.calls[1]?.[1]?.body as string)).toEqual({ returnQuery });
   });
 
   test.each([
@@ -107,9 +94,9 @@ describe("payment method setups", () => {
       .mockResolvedValueOnce(json(session, 201))
       .mockResolvedValueOnce(json(malformed));
 
-    await expect(client(fetch).paymentMethods.getStatus("setup_opaque")).rejects.toBeInstanceOf(
-      TypeError,
-    );
+    await expect(
+      client(fetch).paymentMethods.reference("setup_opaque").status(),
+    ).rejects.toBeInstanceOf(TypeError);
   });
 
   test("opens a vault redirect but waits for canonical success", async () => {
@@ -134,11 +121,12 @@ describe("payment method setups", () => {
     const navigate = vi.fn();
     const events: PresentationEvent[] = [];
 
-    const handle = client(fetch).paymentMethods.present(pendingSetup, {
-      navigate,
-      pollIntervalMs: 0,
-      onEvent: (event) => events.push(event),
-    });
+    const handle = client(fetch)
+      .paymentMethods.setup(pendingSetup)
+      .navigate(navigate)
+      .pollIntervalMs(0)
+      .onEvent((event) => events.push(event))
+      .present();
 
     expect(navigate).toHaveBeenCalledWith("https://vault.example.test/1.8.0/token");
     await expect(handle.completion).resolves.toMatchObject({ status: "succeeded" });
@@ -166,13 +154,20 @@ describe("payment method setups", () => {
       );
     const events: PresentationEvent[] = [];
 
-    const handle = client(fetch).paymentMethods.resume("setup_opaque", {
-      returnQuery: "?status=success&transaction_id=fake",
-      pollIntervalMs: 0,
-      onEvent: (event) => events.push(event),
-    });
+    const handle = client(fetch)
+      .paymentMethods.reference("setup_opaque")
+      .returnQuery("?status=success&transaction_id=fake")
+      .pollIntervalMs(0)
+      .onEvent((event) => events.push(event))
+      .resume();
 
     await expect(handle.completion).resolves.toMatchObject({ status: "failed" });
+    expect(fetch.mock.calls[1]?.[0].toString()).toBe(
+      "https://api.example.test/public/v1/payment-method-setups/setup_opaque/confirm",
+    );
+    expect(JSON.parse(fetch.mock.calls[1]?.[1]?.body as string)).toEqual({
+      returnQuery: "?status=success&transaction_id=fake",
+    });
     expect(events.map((event) => event.type)).toEqual([
       "opening",
       "callback_received",
@@ -190,7 +185,10 @@ describe("payment method setups", () => {
     };
 
     expect(() =>
-      client(vi.fn()).paymentMethods.present(unsafe as PaymentMethodSetup, { navigate }),
+      client(vi.fn())
+        .paymentMethods.setup(unsafe as PaymentMethodSetup)
+        .navigate(navigate)
+        .present(),
     ).toThrow(TypeError);
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -217,7 +215,9 @@ describe("payment method setups", () => {
       .mockResolvedValueOnce(json(session, 201))
       .mockResolvedValueOnce(json(succeeded));
 
-    await expect(client(fetch).paymentMethods.getStatus("setup_opaque")).resolves.toMatchObject({
+    await expect(
+      client(fetch).paymentMethods.reference("setup_opaque").status(),
+    ).resolves.toMatchObject({
       paymentMethod: { brand: "", expiry: { month: 99, year: 1 } },
     });
   });
@@ -238,8 +238,10 @@ describe("payment method setups", () => {
         }),
       );
 
-    await expect(client(fetch).paymentMethods.getStatus(reference)).resolves.toMatchObject({
-      id: reference,
-    });
+    await expect(client(fetch).paymentMethods.reference(reference).status()).resolves.toMatchObject(
+      {
+        id: reference,
+      },
+    );
   });
 });

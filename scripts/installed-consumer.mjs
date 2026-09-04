@@ -62,7 +62,8 @@ const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", api
 if (typeof client.checkout.presentation !== "function" || typeof client.checkout.resume !== "function" || typeof client.checkout.status !== "function") throw new Error("Missing checkout builder exports");
 if ("present" in client.checkout || "getStatus" in client.checkout || "redirect" in client.checkout) throw new Error("Imperative checkout API was exported");
 if ("getProduct" in client.catalogue || "listPrices" in client.catalogue) throw new Error("Imperative catalogue API was exported");
-if (typeof client.paymentMethods.present !== "function" || typeof client.paymentMethods.resume !== "function") throw new Error("Missing payment method presentation exports");
+if (typeof client.paymentMethods.setup !== "function" || typeof client.paymentMethods.reference !== "function" || typeof client.paymentMethods.resume !== "function") throw new Error("Missing payment method builder exports");
+if ("getStatus" in client.paymentMethods || "confirm" in client.paymentMethods || "present" in client.paymentMethods || "start" in client.paymentMethods) throw new Error("Imperative payment method API was exported");
 `,
 );
 execFileSync("bun", [join(consumerRoot, "consumer.mjs")], {
@@ -72,7 +73,7 @@ execFileSync("bun", [join(consumerRoot, "consumer.mjs")], {
 
 writeFileSync(
   join(consumerRoot, "consumer.ts"),
-  `import { createBuPaymentClient, type CataloguePage, type CatalogueProductPage, type CheckoutLifecycle, type CheckoutStatus, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle, type Price, type Product, type ProductWithPrices } from "@bu-payment/browser-sdk";
+  `import { createBuPaymentClient, type CataloguePage, type CatalogueProductPage, type CheckoutLifecycle, type CheckoutStatus, type PaymentMethodReferencedResumeBuilder, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle, type Price, type Product, type ProductWithPrices } from "@bu-payment/browser-sdk";
 const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test" });
 const status: CheckoutStatus = "completed";
 const setup: PaymentMethodSetup = {
@@ -87,7 +88,13 @@ const setup: PaymentMethodSetup = {
   }
 };
 const event: PresentationEvent = { type: "polling", flow: "payment_method_resume", status: "processing" };
-const handle: PresentationHandle<PaymentMethodSetup> = client.paymentMethods.present(setup, { navigate() {} });
+const handle: PresentationHandle<PaymentMethodSetup> = client.paymentMethods.setup(setup).navigate(() => {}).present();
+const paymentMethodStatus: Promise<PaymentMethodSetup> = client.paymentMethods.reference("setup").signal(new AbortController().signal).status();
+const paymentMethodResume: PresentationHandle<PaymentMethodSetup> = client.paymentMethods.reference("setup").returnQuery("?opaque=return").resume();
+const paymentMethodResumeOnly = client.paymentMethods.returnQuery("?opaque=return").reference("setup");
+paymentMethodResumeOnly satisfies PaymentMethodReferencedResumeBuilder;
+// @ts-expect-error Resume-only state must not expose canonical status without confirmation.
+paymentMethodResumeOnly.status();
 const withPrices: Promise<CatalogueProductPage<ProductWithPrices>> = client.catalogue.list().limit(10).get();
 const withoutPrices: Promise<CatalogueProductPage<Product>> = client.catalogue.list().withoutPrices().get();
 const fluentCheckout = client.checkout.destinationKey("default").quantity(1).email("buyer@example.com").idempotencyKey("storefront-order-018f4f90a4c7").priceId("price_public_reference").create();
@@ -98,6 +105,9 @@ const checkoutHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.pr
 const resumeHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.resume().reference("checkout_public_reference").signal(new AbortController().signal).start();
 void event;
 void handle;
+void paymentMethodStatus;
+void paymentMethodResume;
+void paymentMethodResumeOnly;
 void withPrices;
 void withoutPrices;
 void fluentCheckout;

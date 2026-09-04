@@ -13,7 +13,8 @@ flows in a browser without exposing merchant credentials.
 - [Errors](errors.md)
 - [Security and limits](security.md)
 - [End-to-end examples](examples.md)
-- [Payment method presentations](payment-methods.md)
+- [Payment method setups](payment-methods.md)
 
-Every catalogue and checkout operation uses an immutable builder. Calling a configuration method
-returns a new builder, so a configured base can be reused safely for independent requests.
+Every catalogue, checkout, and payment-method operation uses an immutable builder. Calling a
+configuration method returns a new builder, so a configured base can be reused safely for
+independent requests.

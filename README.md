@@ -56,4 +56,4 @@ Start with the [Browser SDK documentation](docs/index.md), then explore:
 - [Errors](docs/errors.md)
 - [Security and limits](docs/security.md)
 - [End-to-end examples](docs/examples.md)
-- [Payment method presentations](docs/payment-methods.md)
+- [Payment method setups](docs/payment-methods.md)

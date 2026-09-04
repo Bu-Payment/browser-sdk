@@ -51,8 +51,10 @@ export {
   ValidationError,
 } from "./errors";
 export type {
-  PaymentMethodPresentationOptions,
-  PaymentMethodRequestOptions,
+  PaymentMethodPresentationBuilder,
+  PaymentMethodReferencedBuilder,
+  PaymentMethodReferencedResumeBuilder,
+  PaymentMethodResumeBuilder,
   PaymentMethodsClient,
 } from "./payment-methods/client";
 export type {

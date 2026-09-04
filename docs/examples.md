@@ -44,6 +44,37 @@ if (canonicalCheckout.status === "completed") {
 }
 ```
 
+## Present and resume a payment-method setup
+
+Create the setup on your confidential backend, then give its provider-neutral response to the
+browser:
+
+```ts
+const handle = buPayment.paymentMethods
+  .setup(setupFromYourBackend)
+  .timeoutMs(10 * 60_000)
+  .onEvent((event) => console.log("Payment method event", event.type))
+  .present();
+
+await handle.completion;
+```
+
+On the hosted redirect's return page, relay the complete query string. The saved setup reference is
+used automatically:
+
+```ts
+const handle = buPayment.paymentMethods
+  .returnQuery(window.location.search)
+  .timeoutMs(10 * 60_000)
+  .resume();
+
+const canonicalSetup = await handle.completion;
+
+if (canonicalSetup.status === "succeeded" && canonicalSetup.paymentMethod?.status === "active") {
+  console.log("Payment method stored", canonicalSetup.paymentMethod.id);
+}
+```
+
 ## Resume after a reload
 
 ```ts

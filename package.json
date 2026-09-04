@@ -1,6 +1,6 @@
 {
   "name": "@bu-payment/browser-sdk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Browser-safe BuPayment client for public catalogue and hosted checkout flows.",
   "type": "module",
   "sideEffects": false,
