@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { createCheckoutIdempotency } from "../../src/checkout/idempotency-store";
 import { createBuPaymentClient } from "../../src/client";
+import { ErrorCode } from "../../src/constants";
+import { parseClientConfig } from "../../src/core/config";
+import { BuPaymentError } from "../../src/errors";
 
 const session = {
   token: "session",
@@ -80,10 +84,11 @@ describe("checkout idempotency", () => {
     const storage = new MemoryStorage();
     const keys: string[] = [];
     let fail = true;
+    const cause = new TypeError("network unavailable");
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       if (String(input).endsWith("application-sessions")) return Response.json(session);
       keys.push(new Headers(init?.headers).get("Idempotency-Key") ?? "");
-      if (fail) throw new TypeError("network unavailable");
+      if (fail) throw cause;
       return Response.json(created);
     });
     const client = createBuPaymentClient({
@@ -94,7 +99,11 @@ describe("checkout idempotency", () => {
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
 
-    await expect(ready(client).create()).rejects.toThrow("network unavailable");
+    const error = await ready(client)
+      .create()
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BuPaymentError);
+    expect(error).toMatchObject({ code: ErrorCode.NETWORK_UNAVAILABLE, cause });
     const retained = storage
       .entries()
       .map(([, value]) => value)
@@ -106,6 +115,81 @@ describe("checkout idempotency", () => {
 
     expect(new Set(keys).size).toBe(1);
     expect(storage.entries().filter(([key]) => key.includes("idempotency"))).toHaveLength(0);
+  });
+
+  it("retains a key when checkout creation is cancelled after dispatch", async () => {
+    const storage = new MemoryStorage();
+    const keys: string[] = [];
+    let rejectRequest: ((reason?: unknown) => void) | undefined;
+    let markRequestStarted: (() => void) | undefined;
+    const requestStarted = new Promise<void>((resolve) => {
+      markRequestStarted = resolve;
+    });
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      if (String(input).endsWith("application-sessions")) return Response.json(session);
+      keys.push(new Headers(init?.headers).get("Idempotency-Key") ?? "");
+      if (keys.length === 1) {
+        markRequestStarted?.();
+        return new Promise<Response>((_resolve, reject) => {
+          rejectRequest = reject;
+        });
+      }
+      return Response.json(created);
+    });
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_example",
+      apiBaseUrl: "https://api.example.test",
+      fetch,
+      storage,
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+    });
+    const controller = new AbortController();
+    const first = ready(client).signal(controller.signal).create();
+    await requestStarted;
+    const cause = new DOMException("cancelled", "AbortError");
+    controller.abort(cause);
+    rejectRequest?.(cause);
+
+    await expect(first).rejects.toMatchObject({ code: ErrorCode.OPERATION_CANCELLED, cause });
+    await ready(client).create();
+
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it("retains a key when checkout creation times out after dispatch", async () => {
+    const storage = new MemoryStorage();
+    const keys: string[] = [];
+    const now = () => new Date("2030-01-01T00:00:00.000Z");
+    const idempotency = createCheckoutIdempotency(
+      parseClientConfig({
+        publishableKey: "bup_pk_test_example",
+        apiBaseUrl: "https://api.example.test",
+      }),
+      storage,
+      now,
+    );
+    const input = {
+      priceId: "price_1",
+      email: "buyer@example.com",
+      quantity: 1,
+      destinationKey: "default",
+    };
+    const create = async (idempotencyKey: string) => {
+      keys.push(idempotencyKey);
+      if (keys.length === 1) {
+        throw new BuPaymentError("Checkout creation timed out", {
+          code: ErrorCode.OPERATION_TIMED_OUT,
+        });
+      }
+      return created;
+    };
+
+    await expect(idempotency.run(input, create)).rejects.toMatchObject({
+      code: ErrorCode.OPERATION_TIMED_OUT,
+    });
+    await idempotency.run(input, create);
+
+    expect(new Set(keys).size).toBe(1);
   });
 
   it("uses distinct keys for changed intent and tolerates unavailable storage", async () => {

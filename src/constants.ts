@@ -23,6 +23,7 @@ export const ErrorCode = Object.freeze({
   CONFIGURATION_INVALID: "configuration_invalid",
   VALIDATION_FAILED: "validation_failed",
   RESPONSE_INVALID: "response_invalid",
+  NETWORK_UNAVAILABLE: "network_unavailable",
   STORAGE_UNAVAILABLE: "storage_unavailable",
   RESUME_INVALID: "resume_invalid",
   RESUME_FAILED: "resume_failed",

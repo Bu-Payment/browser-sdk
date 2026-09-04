@@ -4,6 +4,134 @@ import { ErrorCode } from "../../src/constants";
 import { BuPaymentError, errorFromResponse } from "../../src/errors";
 
 describe("typed API errors", () => {
+  it("wraps a session bootstrap network rejection without losing its cause", async () => {
+    const cause = new TypeError("Failed to fetch");
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch: async () => {
+        throw cause;
+      },
+    });
+
+    const error = await client.catalogue
+      .list()
+      .limit(50)
+      .get()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BuPaymentError);
+    expect(error).toMatchObject({ code: ErrorCode.NETWORK_UNAVAILABLE, cause });
+    expect(error).not.toBe(cause);
+  });
+
+  it("wraps the final protected-request rejection after retries are exhausted", async () => {
+    const causes = [
+      new TypeError("Failed to fetch"),
+      new TypeError("Load failed"),
+      new TypeError("CORS request did not succeed"),
+    ];
+    let requestAttempts = 0;
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (new URL(String(input)).pathname.endsWith("/application-sessions")) {
+        return Response.json({
+          token: "session",
+          expiresAt: "2030-01-01T01:00:00.000Z",
+          renewAfter: "2030-01-01T00:30:00.000Z",
+          capabilities: ["catalogue:read"],
+        });
+      }
+      throw causes[requestAttempts++] as TypeError;
+    });
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch,
+    });
+
+    const error = await client.catalogue
+      .list()
+      .get()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BuPaymentError);
+    expect(error).toMatchObject({ code: ErrorCode.NETWORK_UNAVAILABLE, cause: causes[2] });
+    expect(requestAttempts).toBe(3);
+  });
+
+  it("allows a protected request to recover before transport errors are normalized", async () => {
+    let requestAttempts = 0;
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (new URL(String(input)).pathname.endsWith("/application-sessions")) {
+        return Response.json({
+          token: "session",
+          expiresAt: "2030-01-01T01:00:00.000Z",
+          renewAfter: "2030-01-01T00:30:00.000Z",
+          capabilities: ["catalogue:read"],
+        });
+      }
+      requestAttempts += 1;
+      if (requestAttempts === 1) throw new TypeError("Failed to fetch");
+      return Response.json({ data: [], nextCursor: null });
+    });
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch,
+    });
+
+    await expect(client.catalogue.list().get()).resolves.toEqual({
+      products: [],
+      pagination: { nextCursor: null },
+    });
+    expect(requestAttempts).toBe(2);
+  });
+
+  it("classifies invalid JSON from a successful session response as an invalid response", async () => {
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch: async () => new Response("not-json"),
+    });
+
+    const error = await client.catalogue
+      .list()
+      .get()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BuPaymentError);
+    expect(error).toMatchObject({ code: ErrorCode.RESPONSE_INVALID });
+    expect((error as BuPaymentError).cause).toBeInstanceOf(SyntaxError);
+  });
+
+  it("classifies invalid JSON from a successful protected response as an invalid response", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      if (new URL(String(input)).pathname.endsWith("/application-sessions")) {
+        return Response.json({
+          token: "session",
+          expiresAt: "2030-01-01T01:00:00.000Z",
+          renewAfter: "2030-01-01T00:30:00.000Z",
+          capabilities: ["catalogue:read"],
+        });
+      }
+      return new Response("not-json");
+    });
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch,
+    });
+
+    const error = await client.catalogue
+      .list()
+      .get()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BuPaymentError);
+    expect(error).toMatchObject({ code: ErrorCode.RESPONSE_INVALID });
+    expect((error as BuPaymentError).cause).toBeInstanceOf(SyntaxError);
+  });
+
   it.each([
     [400, "customer_session_malformed", ErrorCode.CUSTOMER_SESSION_MALFORMED],
     [401, "customer_verification_invalid", ErrorCode.CUSTOMER_VERIFICATION_INVALID],

@@ -1,5 +1,5 @@
 import { ErrorCode } from "../constants";
-import { BuPaymentError, errorFromResponse } from "../errors";
+import { BuPaymentError, errorFromResponse, jsonFromResponse, requestError } from "../errors";
 import type { SessionManager } from "../session/session-manager";
 import { apiUrl, type ClientConfig } from "./config";
 import { createRetryPolicy, type RetryPolicy } from "./retry";
@@ -35,19 +35,24 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
         }
         if (request.body !== undefined) headers["Content-Type"] = "application/json";
         if (request.idempotencyKey) headers["Idempotency-Key"] = request.idempotencyKey;
-        const response = await retry.run(
-          { method, hasIdempotencyKey: Boolean(request.idempotencyKey), signal: request.signal },
-          () =>
-            options.fetch(apiUrl(options.config.apiBaseUrl, path), {
-              method,
-              credentials: "omit",
-              headers,
-              ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
-              ...(request.signal ? { signal: request.signal } : {}),
-            }),
-        );
-        if (!response.ok) throw await errorFromResponse(response);
-        return response.json();
+        let response: Response;
+        try {
+          response = await retry.run(
+            { method, hasIdempotencyKey: Boolean(request.idempotencyKey), signal: request.signal },
+            () =>
+              options.fetch(apiUrl(options.config.apiBaseUrl, path), {
+                method,
+                credentials: "omit",
+                headers,
+                ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
+                ...(request.signal ? { signal: request.signal } : {}),
+              }),
+          );
+        } catch (error) {
+          throw requestError(error, request.signal);
+        }
+        if (!response.ok) throw await errorFromResponse(response, request.signal);
+        return jsonFromResponse(response, "BuPayment response is invalid", request.signal);
       };
       const token = await options.sessions.getToken(request.signal);
       try {

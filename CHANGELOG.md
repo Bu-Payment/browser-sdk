@@ -4,6 +4,8 @@
 
 ### Changed
 
+- Network failures now reject with `ErrorCode.NETWORK_UNAVAILABLE` and retain the browser error as
+  `cause`; request cancellation remains distinct and uses `ErrorCode.OPERATION_CANCELLED`.
 - Card saving now uses an immutable, type-state builder ending in `start()` plus root `resume()` and
   `status()` terminals.
 - `resume()` handles both email-verification and hosted-provider returns from the current URL.

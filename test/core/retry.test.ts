@@ -68,4 +68,16 @@ describe("createRetryPolicy", () => {
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(operation).toHaveBeenCalledOnce();
   });
+
+  it("does not retry an AbortError from another realm or fetch polyfill", async () => {
+    const operation = vi.fn(async () => {
+      throw { name: "AbortError", message: "cancelled" };
+    });
+    const policy = createRetryPolicy({ maxAttempts: 3, sleep: async () => undefined });
+
+    await expect(
+      policy.run({ method: "GET", hasIdempotencyKey: false }, operation),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(operation).toHaveBeenCalledOnce();
+  });
 });

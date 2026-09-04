@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBuPaymentClient } from "../../src/client";
+import { ErrorCode } from "../../src/constants";
 
 function session(token: string, renewAfter: string) {
   return {
@@ -172,12 +173,16 @@ describe("browser application session renewal", () => {
     });
     const aborted = client.catalogue.list().signal(controller.signal).get();
     const active = client.catalogue.list().get();
-    controller.abort(new DOMException("cancelled", "AbortError"));
+    const cause = new DOMException("cancelled", "AbortError");
+    controller.abort(cause);
     resolveBootstrap?.(
       Response.json(session("shared", "2026-09-03T12:08:00.000Z"), { status: 201 }),
     );
 
-    await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
+    await expect(aborted).rejects.toMatchObject({
+      code: ErrorCode.OPERATION_CANCELLED,
+      cause,
+    });
     await expect(active).resolves.toEqual({
       products: [],
       pagination: { nextCursor: null },

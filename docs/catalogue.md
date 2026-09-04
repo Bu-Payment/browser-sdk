@@ -108,4 +108,5 @@ abortController.abort();
 await request;
 ```
 
-An aborted request is not retried.
+An aborted request is not retried and rejects with a `BuPaymentError` whose code is
+`ErrorCode.OPERATION_CANCELLED`.
