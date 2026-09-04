@@ -1,4 +1,9 @@
 export type {
+  CardSavingBuilder,
+  CardSavingChallenge,
+  CardSavingClient,
+} from "./card-saving/types";
+export type {
   CatalogueClient,
   CatalogueListBuilder,
   CataloguePricesBuilder,
@@ -40,6 +45,12 @@ export {
   CheckoutLiveNotEnabledError,
   CheckoutProviderFailedError,
   CheckoutUnavailableError,
+  CustomerRateLimitedError,
+  CustomerSessionExpiredError,
+  CustomerSessionInvalidError,
+  CustomerSessionMalformedError,
+  CustomerSessionUnavailableError,
+  CustomerVerificationInvalidError,
   IdempotencyConflictError,
   NotFoundError,
   RateLimitedError,
@@ -50,11 +61,6 @@ export {
   SessionUnavailableError,
   ValidationError,
 } from "./errors";
-export type {
-  PaymentMethodPresentationOptions,
-  PaymentMethodRequestOptions,
-  PaymentMethodsClient,
-} from "./payment-methods/client";
 export type {
   PaymentMethodSetup,
   PaymentMethodSetupStatus,

@@ -1,5 +1,42 @@
 # Agent instructions
 
+## Public API architecture: immutable builders
+
+This browser SDK uses the builder pattern for every public operation. This is
+an architectural invariant, not a local naming preference.
+
+- Public operation inputs are configured through fluent, immutable builders.
+- Every builder instance must be frozen and every configuration method must
+  return a new builder without mutating an earlier instance.
+- Network requests, navigation, polling, storage writes, and other side effects
+  begin only in an explicit terminal method such as `get()`, `create()`,
+  `start()`, `resume()`, or `status()`.
+- Do not replace a builder with an options-object terminal such as
+  `start({ email, currency })` or introduce imperative root methods.
+- Required input must be represented with TypeScript type-state when practical,
+  so the terminal method is unavailable until all required fields are set.
+- Method names describe the user's action rather than provider or transport
+  details. Provider setup objects, redirect queries, opaque references, and
+  authentication headers stay internal whenever the SDK can derive or safely
+  persist them.
+- Convenience must not fabricate security decisions. Consent remains an
+  explicit required builder step, and HMAC credentials must never enter browser
+  code.
+
+Canonical public style:
+
+```ts
+const handle = buPayment.cardSaving
+  .email(email)
+  .currency("EUR")
+  .consent(true)
+  .start();
+```
+
+Any new public API or breaking public API change must include compile-time and
+runtime tests proving builder immutability, terminal side-effect boundaries,
+and required type-state. Documentation and examples must use the builder form.
+
 <!-- init-jj:start -->
 
 ## Version Control: Jujutsu

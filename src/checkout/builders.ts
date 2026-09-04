@@ -1,8 +1,5 @@
-import type {
-  PresentationEvent,
-  PresentationHandle,
-  PresentationOptions,
-} from "../presentation/types";
+import { type LifecycleConfiguration, lifecycleConfiguration } from "../presentation/builders";
+import type { PresentationHandle, PresentationOptions } from "../presentation/types";
 import type { CheckoutCreated, CheckoutLifecycle, CreateCheckoutInput } from "./types";
 
 interface CheckoutRequestOptions {
@@ -36,14 +33,6 @@ export type CheckoutBuilder<TState extends CheckoutBuilderState = CheckoutBuilde
 export interface CheckoutStatusBuilder {
   signal(signal: AbortSignal): CheckoutStatusBuilder;
   get(): Promise<CheckoutLifecycle>;
-}
-
-interface LifecycleConfiguration<TBuilder> {
-  cspNonce(cspNonce: string): TBuilder;
-  onEvent(onEvent: (event: PresentationEvent) => void): TBuilder;
-  pollIntervalMs(pollIntervalMs: number): TBuilder;
-  signal(signal: AbortSignal): TBuilder;
-  timeoutMs(timeoutMs: number): TBuilder;
 }
 
 export interface CheckoutPresentationBuilder
@@ -155,19 +144,6 @@ function createResumeBuilder(
     reference: (nextReference: string) => createResumeBuilder(primitives, nextReference, options),
     start: () => primitives.resume(reference, options),
   });
-}
-
-function lifecycleConfiguration<TBuilder>(
-  options: PresentationOptions,
-  next: (options: PresentationOptions) => TBuilder,
-): LifecycleConfiguration<TBuilder> {
-  return {
-    cspNonce: (cspNonce) => next({ ...options, cspNonce }),
-    onEvent: (onEvent) => next({ ...options, onEvent }),
-    pollIntervalMs: (pollIntervalMs) => next({ ...options, pollIntervalMs }),
-    signal: (signal) => next({ ...options, signal }),
-    timeoutMs: (timeoutMs) => next({ ...options, timeoutMs }),
-  };
 }
 
 function hasEveryCheckoutField(state: CheckoutBuilderState): state is CreateCheckoutInput {

@@ -44,6 +44,31 @@ if (canonicalCheckout.status === "completed") {
 }
 ```
 
+## Verify a customer and save a card
+
+Start the email verification after the customer gives explicit consent:
+
+```ts
+await buPayment.cardSaving
+  .email("buyer@example.com")
+  .currency("EUR")
+  .consent(true)
+  .start();
+```
+
+Use the same operation when the customer returns from the email link and from the hosted vault. The
+SDK reads both return queries and its scoped references internally:
+
+```ts
+const handle = buPayment.cardSaving.resume();
+
+const canonicalSetup = await handle.completion;
+
+if (canonicalSetup.status === "succeeded" && canonicalSetup.paymentMethod?.status === "active") {
+  console.log("Payment method stored", canonicalSetup.paymentMethod.id);
+}
+```
+
 ## Resume after a reload
 
 ```ts

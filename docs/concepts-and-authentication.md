@@ -22,8 +22,8 @@ shopper. Never pass a dashboard JWT, application secret, HMAC key, provider cred
 token to the SDK. The client does not accept or forward them.
 
 All commerce APIs use immutable builders. Configuration methods return a new builder and perform no
-network or presentation work. Only a terminal method such as `get()`, `create()`, or `start()` begins
-the operation.
+network or presentation work. Only a terminal method such as `get()`, `create()`, `status()`,
+`present()`, `resume()`, or `start()` begins the operation.
 
 ## Browser requirements
 

@@ -25,6 +25,7 @@ const allowed = [
   "dist/index.d.ts",
   "dist/index.js",
   "dist/index.js.map",
+  "docs/card-saving.md",
   "docs/catalogue.md",
   "docs/checkout.md",
   "docs/concepts-and-authentication.md",
@@ -33,7 +34,6 @@ const allowed = [
   "docs/idempotency.md",
   "docs/index.md",
   "docs/lifecycle-and-status.md",
-  "docs/payment-methods.md",
   "docs/presentation-and-events.md",
   "docs/resume-and-cancellation.md",
   "docs/security.md",
@@ -62,7 +62,10 @@ const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", api
 if (typeof client.checkout.presentation !== "function" || typeof client.checkout.resume !== "function" || typeof client.checkout.status !== "function") throw new Error("Missing checkout builder exports");
 if ("present" in client.checkout || "getStatus" in client.checkout || "redirect" in client.checkout) throw new Error("Imperative checkout API was exported");
 if ("getProduct" in client.catalogue || "listPrices" in client.catalogue) throw new Error("Imperative catalogue API was exported");
-if (typeof client.paymentMethods.present !== "function" || typeof client.paymentMethods.resume !== "function") throw new Error("Missing payment method presentation exports");
+if ("start" in client.cardSaving || typeof client.cardSaving.email !== "function" || typeof client.cardSaving.resume !== "function" || typeof client.cardSaving.status !== "function") throw new Error("Invalid card saving builder API");
+const readyCardSaving = client.cardSaving.email("buyer@example.com").currency("EUR").consent(true);
+if (!Object.isFrozen(client.cardSaving) || !Object.isFrozen(readyCardSaving) || typeof readyCardSaving.start !== "function") throw new Error("Card saving builder is not immutable");
+if ("paymentMethods" in client) throw new Error("Legacy payment method API was exported");
 `,
 );
 execFileSync("bun", [join(consumerRoot, "consumer.mjs")], {
@@ -75,19 +78,18 @@ writeFileSync(
   `import { createBuPaymentClient, type CataloguePage, type CatalogueProductPage, type CheckoutLifecycle, type CheckoutStatus, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle, type Price, type Product, type ProductWithPrices } from "@bu-payment/browser-sdk";
 const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test" });
 const status: CheckoutStatus = "completed";
-const setup: PaymentMethodSetup = {
-  id: "setup",
-  status: "requires_action",
-  expiresAt: "2030-01-01T00:30:00.000Z",
-  presentationVersion: 1,
-  presentation: { kind: "redirect", url: "https://vault.example.test" },
-  actions: {
-    status: { method: "GET", url: "/public/v1/payment-method-setups/setup" },
-    confirm: { method: "POST", url: "/public/v1/payment-method-setups/setup/confirm" }
-  }
-};
 const event: PresentationEvent = { type: "polling", flow: "payment_method_resume", status: "processing" };
-const handle: PresentationHandle<PaymentMethodSetup> = client.paymentMethods.present(setup, { navigate() {} });
+// @ts-expect-error start is unavailable until all required values are configured.
+client.cardSaving.start();
+// @ts-expect-error consent must be the explicit literal true.
+client.cardSaving.email("buyer@example.com").currency("EUR").consent(false);
+const challenge: Promise<{ expiresAt: string }> = client.cardSaving.consent(true).currency("EUR").email("buyer@example.com").timeoutMs(1_000).start();
+const paymentMethodStatus: Promise<PaymentMethodSetup> = client.cardSaving.status();
+const paymentMethodResume: PresentationHandle<PaymentMethodSetup> = client.cardSaving.resume();
+// @ts-expect-error resume has no public options object.
+client.cardSaving.resume({ timeoutMs: 1_000 });
+// @ts-expect-error status has no public options object.
+client.cardSaving.status({ signal: new AbortController().signal });
 const withPrices: Promise<CatalogueProductPage<ProductWithPrices>> = client.catalogue.list().limit(10).get();
 const withoutPrices: Promise<CatalogueProductPage<Product>> = client.catalogue.list().withoutPrices().get();
 const fluentCheckout = client.checkout.destinationKey("default").quantity(1).email("buyer@example.com").idempotencyKey("storefront-order-018f4f90a4c7").priceId("price_public_reference").create();
@@ -97,7 +99,9 @@ const checkoutLifecycle: Promise<CheckoutLifecycle> = client.checkout.status("ch
 const checkoutHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.presentation({} as never).onEvent(() => {}).timeoutMs(1_000).start();
 const resumeHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.resume().reference("checkout_public_reference").signal(new AbortController().signal).start();
 void event;
-void handle;
+void challenge;
+void paymentMethodStatus;
+void paymentMethodResume;
 void withPrices;
 void withoutPrices;
 void fluentCheckout;
