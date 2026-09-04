@@ -1,150 +1,161 @@
+import { ErrorCode } from "../constants";
 import type { HttpClient } from "../core/http";
+import { BuPaymentError, toBuPaymentError } from "../errors";
+import type { OperationHandle, OperationOptions } from "../operations/types";
+import type { EmitPresentationEvent } from "../presentation/handle";
 import { createPresentationHandle } from "../presentation/handle";
 import { pollCanonical } from "../presentation/poll";
 import type { PresentationResumeStore } from "../presentation/resume-store";
 import { presentationSingleFlight } from "../presentation/single-flight";
-import type { PresentationHandle, PresentationOptions } from "../presentation/types";
 import { type CheckoutClient, createCheckoutBuilders } from "./builders";
+import type { CheckoutIdempotency } from "./idempotency-store";
 import { runModal } from "./modal-runtime";
-import type { CheckoutCreated, CheckoutLifecycle, CreateCheckoutInput } from "./types";
+import { internalCheckout, publicCheckout, publicCheckoutResult } from "./public";
+import type {
+  CheckoutCreated,
+  CheckoutLifecycle,
+  CheckoutResult,
+  CreateCheckoutInput,
+} from "./types";
 import {
   parseCheckoutCreated,
   parseCheckoutLifecycle,
   parseCreateCheckoutInput,
 } from "./validation";
 
-interface CheckoutRequestOptions {
-  idempotencyKey?: string;
-  signal?: AbortSignal;
-}
-
 export type {
   CheckoutBuilder,
   CheckoutClient,
-  CheckoutPresentationBuilder,
+  CheckoutOpenBuilder,
   CheckoutReadyBuilder,
-  CheckoutResumeBuilder,
   CheckoutStatusBuilder,
 } from "./builders";
+
+export interface CheckoutOperations {
+  client: CheckoutClient;
+  resume(options?: OperationOptions): OperationHandle<CheckoutResult> | undefined;
+}
+
+export function createCheckoutOperations(
+  http: HttpClient,
+  resumeStore?: PresentationResumeStore,
+  idempotency?: CheckoutIdempotency,
+): CheckoutOperations {
+  const flights = new Map<string, OperationHandle<CheckoutResult>>();
+  const getStatus = async (reference: string, signal?: AbortSignal) => {
+    if (!reference) throw validationError("Checkout reference must not be empty");
+    const value = await http.request(`public/v1/checkouts/${encodeURIComponent(reference)}`, {
+      ...(signal ? { signal } : {}),
+    });
+    try {
+      return parseCheckoutLifecycle(value);
+    } catch (error) {
+      throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Checkout response is invalid");
+    }
+  };
+
+  const run = async (
+    checkout: CheckoutCreated | CheckoutLifecycle,
+    signal: AbortSignal,
+    emit: EmitPresentationEvent,
+    options: OperationOptions,
+    handle: () => OperationHandle<CheckoutResult>,
+  ): Promise<CheckoutResult> => {
+    if (
+      !checkout.presentation ||
+      (checkout.status !== "pending" && checkout.status !== "processing")
+    ) {
+      throw validationError("Checkout does not have an active operation");
+    }
+    resumeStore?.save("checkout", checkout.reference, checkout.expiresAt);
+    if (checkout.presentation.kind === "redirect") {
+      (options.navigate ?? defaultNavigate)(validateRedirectUrl(checkout.presentation.url));
+      emit({ type: "opened" });
+      return publicCheckoutResult(
+        await pollCheckout(getStatus, checkout.reference, signal, emit, options.pollIntervalMs),
+      );
+    }
+    const document = globalThis.document;
+    if (!document) throw validationError("A browser document is required for modal operations");
+    const result = await runModal({
+      http,
+      checkout,
+      presentation: checkout.presentation,
+      document,
+      signal,
+      emit,
+      ...(options.cspNonce === undefined ? {} : { cspNonce: options.cspNonce }),
+      cancel: () => handle().cancel(),
+      poll: (pollSignal, pollEmit) =>
+        pollCheckout(getStatus, checkout.reference, pollSignal, pollEmit, options.pollIntervalMs),
+    });
+    return publicCheckoutResult(result);
+  };
+
+  const openInternal = (checkout: CheckoutCreated, options: OperationOptions) =>
+    presentationSingleFlight(flights, checkout.reference, () => {
+      let handle: OperationHandle<CheckoutResult>;
+      handle = createPresentationHandle("checkout_redirect", options, (signal, emit) =>
+        run(checkout, signal, emit, options, () => handle),
+      );
+      return clearOnSuccess(resumeStore, handle);
+    });
+
+  const client = createCheckoutBuilders({
+    create: async (input, signal) =>
+      publicCheckout(
+        await runCreate(idempotency, input, (idempotencyKey) =>
+          createCheckout(http, input, idempotencyKey, signal),
+        ),
+      ),
+    getStatus: async (reference, signal) =>
+      publicCheckoutResult(await getStatus(reference, signal)),
+    open: (checkout, options) => {
+      const parsed = internalCheckout(checkout);
+      if (!parsed) throw validationError("Checkout must be returned by this SDK client");
+      return openInternal(parsed, options);
+    },
+    start: (input, options) => {
+      let handle: OperationHandle<CheckoutResult>;
+      handle = createPresentationHandle("checkout_redirect", options, async (signal, emit) => {
+        const checkout = await runCreate(idempotency, input, (idempotencyKey) =>
+          createCheckout(http, input, idempotencyKey, signal),
+        );
+        return run(checkout, signal, emit, options, () => handle);
+      });
+      return handle;
+    },
+  });
+
+  return {
+    client,
+    resume(options = {}) {
+      const reference = resumeStore?.read("checkout")?.reference;
+      if (!reference) return undefined;
+      return presentationSingleFlight(flights, reference, () => {
+        let handle: OperationHandle<CheckoutResult>;
+        handle = createPresentationHandle("checkout_resume", options, async (signal, emit) => {
+          const current = await getStatus(reference, signal);
+          if (checkoutTerminals.has(current.status)) return publicCheckoutResult(current);
+          return run(current, signal, emit, options, () => handle);
+        });
+        return clearOnSuccess(resumeStore, handle);
+      });
+    },
+  };
+}
 
 export function createCheckoutClient(
   http: HttpClient,
   resumeStore?: PresentationResumeStore,
 ): CheckoutClient {
-  const flights = new Map<string, PresentationHandle<CheckoutLifecycle>>();
-  const getStatus = async (reference: string, signal?: AbortSignal) => {
-    if (!reference) throw new TypeError("Checkout reference must not be empty");
-    const value = await http.request(`public/v1/checkouts/${encodeURIComponent(reference)}`, {
-      ...(signal ? { signal } : {}),
-    });
-    return parseCheckoutLifecycle(value);
-  };
-  const redirect = (checkout: CheckoutCreated, navigate = defaultNavigate) => {
-    if (checkout.presentation?.kind !== "redirect") {
-      throw new TypeError("Checkout presentation is not a redirect");
-    }
-    navigate(validateRedirectUrl(checkout.presentation.url));
-  };
-  const present = (checkout: CheckoutCreated, options: PresentationOptions) => {
-    const parsed = parseCheckoutCreated(checkout);
-    if (!parsed.presentation || (parsed.status !== "pending" && parsed.status !== "processing")) {
-      throw new TypeError("Checkout does not have an active presentation");
-    }
-    if (parsed.presentation.kind === "redirect") {
-      validateRedirectUrl(parsed.presentation.url);
-      return presentationSingleFlight(flights, parsed.reference, () =>
-        storedHandle(
-          resumeStore,
-          parsed.reference,
-          parsed.expiresAt,
-          createPresentationHandle("checkout_redirect", options, async (signal, emit) => {
-            redirect(parsed, options.navigate);
-            emit({ type: "opened" });
-            return pollCheckout(getStatus, parsed.reference, signal, emit, options.pollIntervalMs);
-          }),
-        ),
-      );
-    }
-    const document = globalThis.document;
-    if (!document) throw new TypeError("A browser document is required for modal presentations");
-    const presentation = parsed.presentation;
-    return presentationSingleFlight(flights, parsed.reference, () => {
-      let handle: PresentationHandle<CheckoutLifecycle>;
-      handle = createPresentationHandle("checkout_modal", options, (signal, emit) =>
-        runModal({
-          http,
-          checkout: parsed,
-          presentation,
-          document,
-          signal,
-          emit,
-          ...(options.cspNonce === undefined ? {} : { cspNonce: options.cspNonce }),
-          cancel: () => handle.cancel(),
-          poll: (pollSignal, pollEmit) =>
-            pollCheckout(getStatus, parsed.reference, pollSignal, pollEmit, options.pollIntervalMs),
-        }),
-      );
-      return storedHandle(resumeStore, parsed.reference, parsed.expiresAt, handle);
-    });
-  };
-  const resume = (reference: string | undefined, options: PresentationOptions) => {
-    const resolved = reference ?? resumeStore?.read("checkout")?.reference;
-    if (!resolved) throw new TypeError("No resumable checkout presentation was found");
-    return presentationSingleFlight(flights, resolved, () => {
-      let handle: PresentationHandle<CheckoutLifecycle>;
-      handle = createPresentationHandle("checkout_resume", options, async (signal, emit) => {
-        const current = await getStatus(resolved, signal);
-        if (checkoutTerminals.has(current.status)) {
-          emit({
-            type: checkoutSuccess.has(current.status) ? "completed" : "failed",
-            status: current.status,
-          });
-          return current;
-        }
-        if (current.presentation?.kind === "modal") {
-          const document = globalThis.document;
-          if (!document)
-            throw new TypeError("A browser document is required for modal presentations");
-          return runModal({
-            http,
-            checkout: current,
-            presentation: current.presentation,
-            document,
-            signal,
-            emit,
-            ...(options.cspNonce === undefined ? {} : { cspNonce: options.cspNonce }),
-            cancel: () => handle.cancel(),
-            poll: (pollSignal, pollEmit) =>
-              pollCheckout(getStatus, resolved, pollSignal, pollEmit, options.pollIntervalMs),
-          });
-        }
-        return pollCheckout(getStatus, resolved, signal, emit, options.pollIntervalMs);
-      });
-      return clearCheckoutOnSuccess(resumeStore, handle);
-    });
-  };
-  return createCheckoutBuilders({
-    create: (input, options) => createCheckout(http, input, options),
-    getStatus,
-    present,
-    resume,
-  });
+  return createCheckoutOperations(http, resumeStore).client;
 }
 
-function storedHandle<T>(
+function clearOnSuccess(
   store: PresentationResumeStore | undefined,
-  reference: string,
-  expiresAt: string,
-  handle: PresentationHandle<T>,
-): PresentationHandle<T> {
-  store?.save("checkout", reference, expiresAt);
-  return clearCheckoutOnSuccess(store, handle);
-}
-
-function clearCheckoutOnSuccess<T>(
-  store: PresentationResumeStore | undefined,
-  handle: PresentationHandle<T>,
-): PresentationHandle<T> {
+  handle: OperationHandle<CheckoutResult>,
+): OperationHandle<CheckoutResult> {
   handle.completion.then(
     () => store?.clear("checkout"),
     () => undefined,
@@ -175,7 +186,7 @@ function pollCheckout(
 function validateRedirectUrl(value: string): string {
   const url = new URL(value);
   if (url.protocol !== "https:" || url.username || url.password || url.hash) {
-    throw new TypeError("Checkout redirect must use HTTPS without credentials or fragment");
+    throw validationError("Checkout redirect must use HTTPS without credentials or fragment");
   }
   return url.href;
 }
@@ -183,31 +194,45 @@ function validateRedirectUrl(value: string): string {
 async function createCheckout(
   http: HttpClient,
   input: CreateCheckoutInput,
-  options: CheckoutRequestOptions,
+  idempotencyKey: string,
+  signal?: AbortSignal,
 ): Promise<CheckoutCreated> {
-  const body = parseCreateCheckoutInput(input);
-  const idempotencyKey = options.idempotencyKey ?? generateIdempotencyKey();
-  assertIdempotencyKey(idempotencyKey);
+  let body: CreateCheckoutInput;
+  try {
+    body = parseCreateCheckoutInput(input);
+  } catch (error) {
+    throw toBuPaymentError(error, ErrorCode.VALIDATION_FAILED, "Checkout input is invalid");
+  }
   const value = await http.request("public/v1/checkouts", {
     method: "POST",
     body,
     idempotencyKey,
-    ...(options.signal ? { signal: options.signal } : {}),
+    ...(signal ? { signal } : {}),
   });
-  return parseCheckoutCreated(value);
+  let checkout: CheckoutCreated;
+  try {
+    checkout = parseCheckoutCreated(value);
+  } catch (error) {
+    throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Checkout response is invalid");
+  }
+  if (checkout.presentation?.kind === "redirect") validateRedirectUrl(checkout.presentation.url);
+  return checkout;
 }
 
-function generateIdempotencyKey(): string {
+function runCreate<T>(
+  idempotency: CheckoutIdempotency | undefined,
+  input: CreateCheckoutInput,
+  create: (idempotencyKey: string) => Promise<T>,
+): Promise<T> {
+  if (idempotency) return idempotency.run(input, create);
   if (typeof globalThis.crypto?.randomUUID !== "function") {
-    throw new TypeError("crypto.randomUUID is required to generate an idempotency key");
+    throw validationError("Web Crypto UUID support is required to create a checkout");
   }
-  return globalThis.crypto.randomUUID();
+  return create(globalThis.crypto.randomUUID());
 }
 
-function assertIdempotencyKey(value: string): void {
-  if (value.length < 16 || value.length > 200 || !/^[!-~]+$/.test(value)) {
-    throw new TypeError("Idempotency key must be 16 to 200 printable ASCII characters");
-  }
+function validationError(message: string): BuPaymentError {
+  return new BuPaymentError(message, { code: ErrorCode.VALIDATION_FAILED });
 }
 
 function defaultNavigate(url: string): void {

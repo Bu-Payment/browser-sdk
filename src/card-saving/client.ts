@@ -1,17 +1,32 @@
+import { ErrorCode } from "../constants";
 import type { HttpClient } from "../core/http";
 import { asObject, asString, assertExactKeys } from "../core/validation";
+import { BuPaymentError, toBuPaymentError } from "../errors";
+import type { OperationHandle } from "../operations/types";
+import { publicPaymentMethodSetup } from "../payment-methods/public";
+import type { PaymentMethodSetup } from "../payment-methods/types";
 import { parsePaymentMethodSetup } from "../payment-methods/validation";
 import { createPresentationHandle } from "../presentation/handle";
 import { pollCanonical } from "../presentation/poll";
 import { type CardSavingStartState, createCardSavingBuilders } from "./builders";
-import type { CardSavingStore, ChallengeState } from "./store";
+import { cardSavingRequestSignal } from "./request-signal";
+import type { CardSavingStore } from "./store";
 import type { CardSavingChallenge, CardSavingClient } from "./types";
 
 const verificationParameter = "bu_customer_verification_token";
 const terminals = new Set(["succeeded", "failed", "expired"]);
 const successes = new Set(["succeeded"]);
 
-export function createCardSavingClient(http: HttpClient, store: CardSavingStore): CardSavingClient {
+export interface CardSavingOperations {
+  client: CardSavingClient;
+  canResume(search: string): boolean;
+  resume(search: string): OperationHandle<PaymentMethodSetup>;
+}
+
+export function createCardSavingOperations(
+  http: HttpClient,
+  store: CardSavingStore,
+): CardSavingOperations {
   const getStatus = async (signal?: AbortSignal) => {
     const setup = requiredSetup(store);
     const customer = requiredCustomer(store);
@@ -19,18 +34,30 @@ export function createCardSavingClient(http: HttpClient, store: CardSavingStore)
       customerSessionToken: customer.token,
       ...(signal ? { signal } : {}),
     });
-    return parsePaymentMethodSetup(value);
+    try {
+      return parsePaymentMethodSetup(value);
+    } catch (error) {
+      throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Card-saving response is invalid");
+    }
   };
-  return createCardSavingBuilders({
+  let active: OperationHandle<PaymentMethodSetup> | undefined;
+  const client = createCardSavingBuilders({
     start: (input) => start(http, store, input),
-    status: () => getStatus(),
-    resume: () =>
-      createPresentationHandle("payment_method_resume", {}, async (signal, emit) => {
-        const search = browserLocation().search;
-        const verificationToken = new URLSearchParams(search).get(verificationParameter);
+    status: async () => publicPaymentMethodSetup(await getStatus()),
+  });
+  return {
+    client,
+    canResume(search) {
+      if (new URLSearchParams(search).has(verificationParameter)) return true;
+      return Boolean(store.readSetup() && store.readCustomer());
+    },
+    resume(search) {
+      if (active) return active;
+      const verificationToken = new URLSearchParams(search).get(verificationParameter);
+      if (verificationToken !== null) assertVerificationToken(verificationToken);
+      let handle: OperationHandle<PaymentMethodSetup>;
+      handle = createPresentationHandle("payment_method_resume", {}, async (signal, emit) => {
         if (verificationToken !== null) {
-          assertVerificationToken(verificationToken);
-          removeVerificationToken();
           const setup = await verifyAndCreate(http, store, verificationToken, signal);
           store.saveSetup({ reference: setup.id, expiresAt: setup.expiresAt });
           if (setup.status === "requires_action" && setup.presentation) {
@@ -52,9 +79,21 @@ export function createCardSavingClient(http: HttpClient, store: CardSavingStore)
           undefined,
         );
         if (terminals.has(result.status)) store.clearSetup();
-        return result;
-      }),
-  });
+        return publicPaymentMethodSetup(result);
+      });
+      active = handle;
+      handle.completion
+        .finally(() => {
+          if (active === handle) active = undefined;
+        })
+        .catch(() => undefined);
+      return handle;
+    },
+  };
+}
+
+export function createCardSavingClient(http: HttpClient, store: CardSavingStore): CardSavingClient {
+  return createCardSavingOperations(http, store).client;
 }
 
 async function start(
@@ -62,8 +101,13 @@ async function start(
   store: CardSavingStore,
   input: CardSavingStartState,
 ): Promise<CardSavingChallenge> {
-  const body = parseStartInput(input);
-  const request = challengeRequestSignal(input.signal, input.timeoutMs);
+  let body: ReturnType<typeof parseStartInput>;
+  try {
+    body = parseStartInput(input);
+  } catch (error) {
+    throw toBuPaymentError(error, ErrorCode.VALIDATION_FAILED, "Card-saving input is invalid");
+  }
+  const request = cardSavingRequestSignal(input.signal, input.timeoutMs);
   let value: unknown;
   try {
     value = await http.request("public/v1/customer-email-challenges", {
@@ -74,7 +118,12 @@ async function start(
   } finally {
     request.cleanup();
   }
-  const response = parseChallenge(value);
+  let response: ReturnType<typeof parseChallenge>;
+  try {
+    response = parseChallenge(value);
+  } catch (error) {
+    throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Card-saving response is invalid");
+  }
   store.clearCustomer();
   store.clearSetup();
   store.saveChallenge({
@@ -86,42 +135,29 @@ async function start(
   return { expiresAt: response.expiresAt };
 }
 
-function challengeRequestSignal(signal?: AbortSignal, timeoutMs?: number) {
-  if (timeoutMs === undefined) return { signal, cleanup: () => undefined };
-  if (!Number.isFinite(timeoutMs) || timeoutMs < 1) {
-    throw new RangeError("timeoutMs must be a positive number");
-  }
-  const controller = new AbortController();
-  const externalAbort = () => controller.abort(signal?.reason);
-  signal?.addEventListener("abort", externalAbort, { once: true });
-  if (signal?.aborted) externalAbort();
-  const timeout = setTimeout(
-    () => controller.abort(new DOMException("Card saving start timed out", "TimeoutError")),
-    timeoutMs,
-  );
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      clearTimeout(timeout);
-      signal?.removeEventListener("abort", externalAbort);
-    },
-  };
-}
-
 async function verifyAndCreate(
   http: HttpClient,
   store: CardSavingStore,
   verificationToken: string,
   signal: AbortSignal,
 ) {
-  const challenge = requiredChallenge(store);
+  const challenge = store.readChallenge();
+  if (!challenge) {
+    throw new BuPaymentError("No pending card saving verification was found", {
+      code: ErrorCode.RESUME_FAILED,
+    });
+  }
   let customer = store.readCustomer();
   if (!customer) {
     const value = await http.request(
       `public/v1/customer-email-challenges/${encodeURIComponent(challenge.reference)}/verify`,
       { method: "POST", body: { verificationToken }, signal },
     );
-    customer = parseCustomerSession(value);
+    try {
+      customer = parseCustomerSession(value);
+    } catch (error) {
+      throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Card-saving response is invalid");
+    }
     store.saveCustomer(customer);
   }
   const idempotencyKey = challenge.idempotencyKey ?? generateIdempotencyKey();
@@ -137,7 +173,12 @@ async function verifyAndCreate(
       consent: { type: "merchant_initiated_future_payments", accepted: true },
     },
   });
-  const setup = parsePaymentMethodSetup(value);
+  let setup: ReturnType<typeof parsePaymentMethodSetup>;
+  try {
+    setup = parsePaymentMethodSetup(value);
+  } catch (error) {
+    throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Card-saving response is invalid");
+  }
   store.clearChallenge();
   return setup;
 }
@@ -207,12 +248,6 @@ function date(value: unknown): string {
   return result;
 }
 
-function requiredChallenge(store: CardSavingStore): ChallengeState {
-  const state = store.readChallenge();
-  if (!state) throw new TypeError("No pending card saving verification was found");
-  return state;
-}
-
 function requiredCustomer(store: CardSavingStore) {
   const state = store.readCustomer();
   if (!state) throw new TypeError("No active card saving customer session was found");
@@ -227,16 +262,9 @@ function requiredSetup(store: CardSavingStore) {
 
 function assertVerificationToken(value: string): void {
   if (!/^bup_cvt_(?:live|test)_[A-Za-z0-9_-]{43}$/u.test(value)) {
-    throw new TypeError("Customer verification token is invalid");
-  }
-}
-
-function removeVerificationToken(): void {
-  const location = browserLocation();
-  const url = new URL(location.href);
-  url.searchParams.delete(verificationParameter);
-  if (typeof globalThis.history?.replaceState === "function") {
-    globalThis.history.replaceState(globalThis.history.state, "", url.href);
+    throw new BuPaymentError("Customer verification token is invalid", {
+      code: ErrorCode.RESUME_INVALID,
+    });
   }
 }
 

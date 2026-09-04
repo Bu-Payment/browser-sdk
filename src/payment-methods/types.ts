@@ -25,11 +25,14 @@ export interface PaymentMethodSetup {
   id: string;
   status: PaymentMethodSetupStatus;
   expiresAt: string;
+  paymentMethod?: StoredPaymentMethod;
+}
+
+export interface PaymentMethodSetupResponse extends PaymentMethodSetup {
   presentationVersion?: 1;
   presentation?: { kind: "redirect"; url: string };
   actions: {
     status: { method: "GET"; url: string };
     confirm?: { method: "POST"; url: string };
   };
-  paymentMethod?: StoredPaymentMethod;
 }

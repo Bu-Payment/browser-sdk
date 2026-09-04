@@ -1,3 +1,5 @@
+import { ErrorCode } from "../constants";
+import { BuPaymentError } from "../errors";
 import type { EmitPresentationEvent } from "./handle";
 
 export interface CanonicalStatus {
@@ -13,7 +15,9 @@ export async function pollCanonical<T extends CanonicalStatus>(
   intervalMs = 1_000,
 ): Promise<T> {
   if (!Number.isFinite(intervalMs) || intervalMs < 0) {
-    throw new RangeError("pollIntervalMs must be a non-negative number");
+    throw new BuPaymentError("pollIntervalMs must be a non-negative number", {
+      code: ErrorCode.VALIDATION_FAILED,
+    });
   }
   while (true) {
     throwIfAborted(signal);

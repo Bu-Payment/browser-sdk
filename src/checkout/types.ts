@@ -94,3 +94,15 @@ export interface CheckoutLifecycle {
   updatedAt: string;
   expiresAt: string;
 }
+
+export interface Checkout {
+  reference: string;
+  type: CheckoutType;
+  status: CheckoutStatus;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface CheckoutResult extends Checkout {
+  updatedAt: string;
+}

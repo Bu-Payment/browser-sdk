@@ -75,15 +75,12 @@ async function parse(value: unknown) {
     .email("buyer@example.com")
     .quantity(1)
     .destinationKey("default")
-    .idempotencyKey("checkout-security-key")
     .create();
 }
 
 describe("trusted presentation registry", () => {
   test("accepts the exact canonical modal contract", async () => {
-    await expect(parse(modal)).resolves.toMatchObject({
-      presentation: { adapter: "trust-my-travel-payment-modal" },
-    });
+    await expect(parse(modal)).resolves.toMatchObject({ reference: "checkout_public" });
   });
 
   test.each([
@@ -119,6 +116,6 @@ describe("trusted presentation registry", () => {
     },
     { ...modal, presentation: { kind: "iframe", url: "https://evil.test" } },
   ])("rejects an untrusted descriptor before execution %#", async (descriptor) => {
-    await expect(parse(descriptor)).rejects.toBeInstanceOf(TypeError);
+    await expect(parse(descriptor)).rejects.toMatchObject({ code: "response_invalid" });
   });
 });

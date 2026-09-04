@@ -1,50 +1,25 @@
 # Resume and cancellation
 
-After a reload or redirect return, resume the latest stored checkout presentation:
+One API resumes checkout and card-saving operations:
 
-```ts
-const handle = buPayment.checkout
-  .resume()
-  .timeoutMs(10 * 60_000)
-  .pollIntervalMs(1_000)
-  .onEvent((event) => console.log(event))
-  .start();
+```js
+import { OperationKind } from "@bu-payment/browser-sdk";
 
-const canonicalCheckout = await handle.completion;
+const operation = buPayment.operations.resume();
+
+if (operation?.kind === OperationKind.CARD_SAVING) {
+  const setup = await operation.completion;
+  console.log(setup.status);
+}
 ```
 
-Use an explicit opaque reference when your application already has it:
+A page with no scoped, unexpired operation returns `undefined`. That is ordinary state, not an
+error. The SDK selects the operation from its scoped state and owned URL inputs.
 
-```ts
-const abortController = new AbortController();
-const handle = buPayment.checkout
-  .resume()
-  .reference("checkout_public_reference")
-  .signal(abortController.signal)
-  .start();
-```
+For card-saving returns, the SDK removes the complete query from browser history synchronously,
+before verification, confirmation, polling, or navigation begins. Verification tokens and provider
+queries are never emitted, returned, or persisted.
 
-## Builder signature and defaults
-
-```ts
-resume(): CheckoutResumeBuilder
-reference(reference: string): CheckoutResumeBuilder
-timeoutMs(milliseconds: number): CheckoutResumeBuilder
-pollIntervalMs(milliseconds: number): CheckoutResumeBuilder
-cspNonce(nonce: string): CheckoutResumeBuilder
-onEvent(listener: (event: PresentationEvent) => void): CheckoutResumeBuilder
-signal(signal: AbortSignal): CheckoutResumeBuilder
-start(): PresentationHandle<CheckoutLifecycle>
-```
-
-Without `reference()`, `start()` reads the latest unexpired checkout reference from scoped
-`sessionStorage`. The default poll interval is 1,000 ms; timeout, CSP nonce, listener, and signal are
-unset. An active modal is reopened. An active redirect resumes polling without navigating again.
-
-The SDK stores only the opaque reference, flow version, and expiry, scoped to the API URL and
-publishable application. It never stores session tokens, callback payloads, modal configuration,
-provider IDs, or return queries.
-
-Call `handle.cancel()` or abort the configured signal to stop local polling and close an open modal.
-Cancellation rejects `completion` with `AbortError`; timeout rejects it with `TimeoutError`. Neither
-operation claims to cancel a server-side payment or emits a successful canonical status.
+Call `operation.cancel()` to stop local work. Cancellation does not claim to cancel server-side
+financial work and rejects `completion` with `ErrorCode.OPERATION_CANCELLED`. A configured checkout
+timeout rejects with `ErrorCode.OPERATION_TIMED_OUT`.

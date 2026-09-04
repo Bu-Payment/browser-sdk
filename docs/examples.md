@@ -1,101 +1,29 @@
-# End-to-end examples
+# Examples
 
-## Catalogue to canonical checkout completion
+## Complete checkout
 
-```ts
-import {
-  createBuPaymentClient,
-  type PresentationEvent,
-} from "@bu-payment/browser-sdk";
-
-const buPayment = createBuPaymentClient({
-  publishableKey: "bup_pk_test_your_publishable_key",
-  apiBaseUrl: "https://api.example.com",
-});
-
-const { products } = await buPayment.catalogue.list().limit(25).get();
-const price = products.flatMap((product) => product.prices)[0];
-
-if (!price) throw new Error("No purchasable price is available");
-
-const checkout = await buPayment.checkout
-  .priceId(price.id)
-  .email("buyer@example.com")
-  .quantity(1)
+```js
+const operation = buPayment.checkout
   .destinationKey("default")
-  .idempotencyKey(`storefront-${crypto.randomUUID()}`)
-  .create();
-
-const abortController = new AbortController();
-const handle = buPayment.checkout
-  .presentation(checkout)
-  .timeoutMs(10 * 60_000)
-  .pollIntervalMs(1_000)
-  .onEvent((event: PresentationEvent) => {
-    console.log("Checkout event", event.type);
-  })
-  .signal(abortController.signal)
-  .start();
-
-const canonicalCheckout = await handle.completion;
-
-if (canonicalCheckout.status === "completed") {
-  console.log("Checkout completed", canonicalCheckout.reference);
-}
-```
-
-## Verify a customer and save a card
-
-Start the email verification after the customer gives explicit consent:
-
-```ts
-await buPayment.cardSaving
+  .quantity(1)
   .email("buyer@example.com")
-  .currency("EUR")
-  .consent(true)
+  .priceId("price_public_reference")
+  .onEvent(({ kind, type }) => console.log(kind, type))
   .start();
+
+const result = await operation.completion;
 ```
 
-Use the same operation when the customer returns from the email link and from the hosted vault. The
-SDK reads both return queries and its scoped references internally:
+## Resume after a reload or return
 
-```ts
-const handle = buPayment.cardSaving.resume();
-
-const canonicalSetup = await handle.completion;
-
-if (canonicalSetup.status === "succeeded" && canonicalSetup.paymentMethod?.status === "active") {
-  console.log("Payment method stored", canonicalSetup.paymentMethod.id);
-}
+```js
+const operation = buPayment.operations.resume();
+if (operation) await operation.completion;
 ```
 
-## Resume after a reload
+## TypeScript imports
 
 ```ts
-import { createBuPaymentClient } from "@bu-payment/browser-sdk";
-
-const buPayment = createBuPaymentClient({
-  publishableKey: "bup_pk_test_your_publishable_key",
-  apiBaseUrl: "https://api.example.com",
-});
-
-try {
-  const handle = buPayment.checkout
-    .resume()
-    .timeoutMs(10 * 60_000)
-    .onEvent((event) => console.log("Checkout event", event.type))
-    .start();
-
-  const canonicalCheckout = await handle.completion;
-  console.log("Canonical status", canonicalCheckout.status);
-} catch (error) {
-  if (
-    error instanceof TypeError &&
-    error.message === "No resumable checkout presentation was found"
-  ) {
-    console.log("No checkout to resume");
-  } else {
-    throw error;
-  }
-}
+import { createBuPaymentClient, OperationKind } from "@bu-payment/browser-sdk";
+import type { BuPaymentClient, OperationEvent, OperationHandle } from "@bu-payment/browser-sdk/types";
 ```

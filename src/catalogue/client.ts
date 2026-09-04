@@ -1,3 +1,4 @@
+import { ErrorCode } from "../constants";
 import type { HttpClient } from "../core/http";
 import {
   asNullableString,
@@ -6,6 +7,7 @@ import {
   assertExactKeys,
   type JsonObject,
 } from "../core/validation";
+import { toBuPaymentError } from "../errors";
 import type {
   CataloguePage,
   CatalogueProductPage,
@@ -75,11 +77,11 @@ function createCatalogueListBuilder<TProduct extends Product>(
     signal: (signal: AbortSignal) => next({ ...options, signal }),
     withoutPrices: () => createCatalogueListBuilder(http, options, parseProduct, false),
     get: async () => {
-      const query = buildListQuery(options, undefined, includePrices);
+      const query = catalogueInput(() => buildListQuery(options, undefined, includePrices));
       const value = await http.request(`public/v1/catalogue/products${query}`, {
         ...(options.signal ? { signal: options.signal } : {}),
       });
-      const page = parsePage(value, parseItem);
+      const page = catalogueResponse(() => parsePage(value, parseItem));
       return { products: page.data, pagination: { nextCursor: page.nextCursor } };
     },
   });
@@ -98,13 +100,19 @@ function createCatalogueProductBuilder<TProduct extends Product>(
     withoutPrices: () =>
       createCatalogueProductBuilder(http, productId, signal, parseProduct, false),
     get: async () => {
-      if (!productId.trim()) throw new TypeError("productId must not be empty");
+      if (!productId.trim()) {
+        throw toBuPaymentError(
+          new TypeError("productId must not be empty"),
+          ErrorCode.VALIDATION_FAILED,
+          "Catalogue input is invalid",
+        );
+      }
       const query = includePrices ? "" : "?include=none";
       const value = await http.request(
         `public/v1/catalogue/products/${encodeURIComponent(productId)}${query}`,
         signal ? { signal } : {},
       );
-      return parseItem(value);
+      return catalogueResponse(() => parseItem(value));
     },
   });
 }
@@ -121,13 +129,29 @@ function createCataloguePricesBuilder(
     productId: (productId: string) => next({ ...options, productId }),
     signal: (signal: AbortSignal) => next({ ...options, signal }),
     get: async () => {
-      const query = buildListQuery(options, options.productId);
+      const query = catalogueInput(() => buildListQuery(options, options.productId));
       const value = await http.request(`public/v1/catalogue/prices${query}`, {
         ...(options.signal ? { signal: options.signal } : {}),
       });
-      return parsePage(value, parsePrice);
+      return catalogueResponse(() => parsePage(value, parsePrice));
     },
   });
+}
+
+function catalogueInput<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    throw toBuPaymentError(error, ErrorCode.VALIDATION_FAILED, "Catalogue input is invalid");
+  }
+}
+
+function catalogueResponse<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    throw toBuPaymentError(error, ErrorCode.RESPONSE_INVALID, "Catalogue response is invalid");
+  }
 }
 
 function buildListQuery(options: ListOptions, productId?: string, includePrices?: boolean): string {

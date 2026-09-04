@@ -1,13 +1,8 @@
+import type { OperationHandle, OperationOptions } from "../operations/types";
 import { type LifecycleConfiguration, lifecycleConfiguration } from "../presentation/builders";
-import type { PresentationHandle, PresentationOptions } from "../presentation/types";
-import type { CheckoutCreated, CheckoutLifecycle, CreateCheckoutInput } from "./types";
+import type { Checkout, CheckoutResult, CreateCheckoutInput } from "./types";
 
-interface CheckoutRequestOptions {
-  idempotencyKey?: string;
-  signal?: AbortSignal;
-}
-
-type CheckoutBuilderState = Partial<CreateCheckoutInput & CheckoutRequestOptions>;
+type CheckoutBuilderState = Partial<CreateCheckoutInput> & OperationOptions;
 
 interface CheckoutBuilderMethods<TState extends CheckoutBuilderState> {
   priceId(priceId: string): CheckoutBuilder<TState & Pick<CreateCheckoutInput, "priceId">>;
@@ -16,14 +11,17 @@ interface CheckoutBuilderMethods<TState extends CheckoutBuilderState> {
   destinationKey(
     destinationKey: string,
   ): CheckoutBuilder<TState & Pick<CreateCheckoutInput, "destinationKey">>;
-  idempotencyKey(
-    idempotencyKey: string,
-  ): CheckoutBuilder<TState & Pick<CheckoutRequestOptions, "idempotencyKey">>;
-  signal(signal: AbortSignal): CheckoutBuilder<TState & Pick<CheckoutRequestOptions, "signal">>;
+  cspNonce(cspNonce: string): CheckoutBuilder<TState>;
+  navigate(navigate: (url: string) => void): CheckoutBuilder<TState>;
+  onEvent(onEvent: NonNullable<OperationOptions["onEvent"]>): CheckoutBuilder<TState>;
+  pollIntervalMs(pollIntervalMs: number): CheckoutBuilder<TState>;
+  signal(signal: AbortSignal): CheckoutBuilder<TState>;
+  timeoutMs(timeoutMs: number): CheckoutBuilder<TState>;
 }
 
 export interface CheckoutReadyBuilder {
-  create(): Promise<CheckoutCreated>;
+  create(): Promise<Checkout>;
+  start(): OperationHandle<CheckoutResult>;
 }
 
 export type CheckoutBuilder<TState extends CheckoutBuilderState = CheckoutBuilderState> =
@@ -32,46 +30,31 @@ export type CheckoutBuilder<TState extends CheckoutBuilderState = CheckoutBuilde
 
 export interface CheckoutStatusBuilder {
   signal(signal: AbortSignal): CheckoutStatusBuilder;
-  get(): Promise<CheckoutLifecycle>;
+  get(): Promise<CheckoutResult>;
 }
 
-export interface CheckoutPresentationBuilder
-  extends LifecycleConfiguration<CheckoutPresentationBuilder> {
-  navigate(navigate: (url: string) => void): CheckoutPresentationBuilder;
-  start(): PresentationHandle<CheckoutLifecycle>;
-}
-
-export interface CheckoutResumeBuilder extends LifecycleConfiguration<CheckoutResumeBuilder> {
-  reference(reference: string): CheckoutResumeBuilder;
-  start(): PresentationHandle<CheckoutLifecycle>;
+export interface CheckoutOpenBuilder extends LifecycleConfiguration<CheckoutOpenBuilder> {
+  navigate(navigate: (url: string) => void): CheckoutOpenBuilder;
+  start(): OperationHandle<CheckoutResult>;
 }
 
 interface CheckoutPrimitives {
-  create(input: CreateCheckoutInput, options: CheckoutRequestOptions): Promise<CheckoutCreated>;
-  getStatus(reference: string, signal?: AbortSignal): Promise<CheckoutLifecycle>;
-  present(
-    checkout: CheckoutCreated,
-    options: PresentationOptions,
-  ): PresentationHandle<CheckoutLifecycle>;
-  resume(
-    reference: string | undefined,
-    options: PresentationOptions,
-  ): PresentationHandle<CheckoutLifecycle>;
+  create(input: CreateCheckoutInput, signal?: AbortSignal): Promise<Checkout>;
+  getStatus(reference: string, signal?: AbortSignal): Promise<CheckoutResult>;
+  open(checkout: Checkout, options: OperationOptions): OperationHandle<CheckoutResult>;
+  start(input: CreateCheckoutInput, options: OperationOptions): OperationHandle<CheckoutResult>;
 }
 
 export type CheckoutClient = CheckoutBuilder<Record<never, never>> & {
   status(reference: string): CheckoutStatusBuilder;
-  presentation(checkout: CheckoutCreated): CheckoutPresentationBuilder;
-  resume(): CheckoutResumeBuilder;
+  open(checkout: Checkout): CheckoutOpenBuilder;
 };
 
 export function createCheckoutBuilders(primitives: CheckoutPrimitives): CheckoutClient {
   return Object.freeze({
     ...createCheckoutBuilder(primitives, {}),
     status: (reference: string) => createStatusBuilder(primitives, reference),
-    presentation: (checkout: CheckoutCreated) =>
-      createPresentationBuilder(primitives, checkout, {}),
-    resume: () => createResumeBuilder(primitives, undefined, {}),
+    open: (checkout: Checkout) => createOpenBuilder(primitives, checkout, {}),
   });
 }
 
@@ -79,30 +62,24 @@ function createCheckoutBuilder<TState extends CheckoutBuilderState>(
   primitives: CheckoutPrimitives,
   state: TState,
 ): CheckoutBuilder<TState> {
+  const next = (update: Partial<CheckoutBuilderState>) =>
+    createCheckoutBuilder(primitives, { ...state, ...update });
   const builder: Record<string, unknown> = {
-    priceId: (priceId: string) => createCheckoutBuilder(primitives, { ...state, priceId }),
-    email: (email: string) => createCheckoutBuilder(primitives, { ...state, email }),
-    quantity: (quantity: number) => createCheckoutBuilder(primitives, { ...state, quantity }),
-    destinationKey: (destinationKey: string) =>
-      createCheckoutBuilder(primitives, { ...state, destinationKey }),
-    idempotencyKey: (idempotencyKey: string) =>
-      createCheckoutBuilder(primitives, { ...state, idempotencyKey }),
-    signal: (signal: AbortSignal) => createCheckoutBuilder(primitives, { ...state, signal }),
+    priceId: (priceId: string) => next({ priceId }),
+    email: (email: string) => next({ email }),
+    quantity: (quantity: number) => next({ quantity }),
+    destinationKey: (destinationKey: string) => next({ destinationKey }),
+    cspNonce: (cspNonce: string) => next({ cspNonce }),
+    navigate: (navigate: (url: string) => void) => next({ navigate }),
+    onEvent: (onEvent: NonNullable<OperationOptions["onEvent"]>) => next({ onEvent }),
+    pollIntervalMs: (pollIntervalMs: number) => next({ pollIntervalMs }),
+    signal: (signal: AbortSignal) => next({ signal }),
+    timeoutMs: (timeoutMs: number) => next({ timeoutMs }),
   };
   if (hasEveryCheckoutField(state)) {
-    builder.create = () =>
-      primitives.create(
-        {
-          priceId: state.priceId,
-          email: state.email,
-          quantity: state.quantity,
-          destinationKey: state.destinationKey,
-        },
-        {
-          ...(state.idempotencyKey !== undefined ? { idempotencyKey: state.idempotencyKey } : {}),
-          ...(state.signal ? { signal: state.signal } : {}),
-        },
-      );
+    const input = checkoutInput(state);
+    builder.create = () => primitives.create(input, state.signal);
+    builder.start = () => primitives.start(input, operationOptions(state));
   }
   return Object.freeze(builder) as CheckoutBuilder<TState>;
 }
@@ -118,34 +95,43 @@ function createStatusBuilder(
   });
 }
 
-function createPresentationBuilder(
+function createOpenBuilder(
   primitives: CheckoutPrimitives,
-  checkout: CheckoutCreated,
-  options: PresentationOptions,
-): CheckoutPresentationBuilder {
-  const next = (nextOptions: PresentationOptions) =>
-    createPresentationBuilder(primitives, checkout, nextOptions);
+  checkout: Checkout,
+  options: OperationOptions,
+): CheckoutOpenBuilder {
+  const next = (nextOptions: OperationOptions) =>
+    createOpenBuilder(primitives, checkout, nextOptions);
   return Object.freeze({
     ...lifecycleConfiguration(options, next),
     navigate: (navigate: (url: string) => void) => next({ ...options, navigate }),
-    start: () => primitives.present(checkout, options),
+    start: () => primitives.open(checkout, options),
   });
 }
 
-function createResumeBuilder(
-  primitives: CheckoutPrimitives,
-  reference: string | undefined,
-  options: PresentationOptions,
-): CheckoutResumeBuilder {
-  const next = (nextOptions: PresentationOptions) =>
-    createResumeBuilder(primitives, reference, nextOptions);
-  return Object.freeze({
-    ...lifecycleConfiguration(options, next),
-    reference: (nextReference: string) => createResumeBuilder(primitives, nextReference, options),
-    start: () => primitives.resume(reference, options),
-  });
-}
-
-function hasEveryCheckoutField(state: CheckoutBuilderState): state is CreateCheckoutInput {
+function hasEveryCheckoutField(
+  state: CheckoutBuilderState,
+): state is CheckoutBuilderState & CreateCheckoutInput {
   return "priceId" in state && "email" in state && "quantity" in state && "destinationKey" in state;
+}
+
+function checkoutInput(state: CheckoutBuilderState & CreateCheckoutInput): CreateCheckoutInput {
+  return {
+    priceId: state.priceId,
+    email: state.email,
+    quantity: state.quantity,
+    destinationKey: state.destinationKey,
+  };
+}
+
+function operationOptions(state: CheckoutBuilderState): OperationOptions {
+  const { signal, timeoutMs, pollIntervalMs, cspNonce, navigate, onEvent } = state;
+  return {
+    ...(signal ? { signal } : {}),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
+    ...(cspNonce === undefined ? {} : { cspNonce }),
+    ...(navigate === undefined ? {} : { navigate }),
+    ...(onEvent === undefined ? {} : { onEvent }),
+  };
 }

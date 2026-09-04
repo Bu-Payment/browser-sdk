@@ -41,10 +41,7 @@ describe("checkout builder", () => {
       fetch,
     });
     const controller = new AbortController();
-    const email = client.checkout
-      .idempotencyKey("storefront-order-018f4f90a4c7")
-      .signal(controller.signal)
-      .email("buyer@example.com");
+    const email = client.checkout.signal(controller.signal).email("buyer@example.com");
     const destination = email.destinationKey("default");
 
     const checkout = await destination.priceId("price_1").quantity(2).create();
@@ -57,7 +54,7 @@ describe("checkout builder", () => {
       quantity: 2,
       destinationKey: "default",
     });
-    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("storefront-order-018f4f90a4c7");
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toHaveLength(36);
     expect(init?.signal).toBe(controller.signal);
     expect(checkout).toMatchObject({ type: "payment", status: "pending" });
   });
@@ -75,23 +72,16 @@ describe("checkout builder", () => {
     expectTypeOf<Parameters<ReadyBuilder["create"]>>().toEqualTypeOf<[]>();
   });
 
-  it("rejects an explicitly invalid fluent idempotency key", async () => {
-    const fetch = createFetch();
+  it("does not expose consumer idempotency configuration", () => {
     const client = createBuPaymentClient({
       publishableKey: "bup_pk_test_sample",
       apiBaseUrl: "https://api.example.test",
-      fetch,
+      fetch: createFetch(),
     });
 
-    const checkout = client.checkout
-      .priceId("price_1")
-      .email("buyer@example.com")
-      .quantity(1)
-      .destinationKey("default")
-      .idempotencyKey("")
-      .create();
-
-    await expect(checkout).rejects.toThrow(/Idempotency key/);
-    expect(fetch).not.toHaveBeenCalled();
+    expect(client.checkout).not.toHaveProperty("idempotencyKey");
+    expectTypeOf<
+      "idempotencyKey" extends keyof CheckoutClient ? true : false
+    >().toEqualTypeOf<false>();
   });
 });

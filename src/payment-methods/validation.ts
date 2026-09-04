@@ -1,6 +1,6 @@
 import { asObject, asString, assertExactKeys, type JsonObject } from "../core/validation";
 import type {
-  PaymentMethodSetup,
+  PaymentMethodSetupResponse,
   PaymentMethodSetupStatus,
   PaymentMethodStatus,
   StoredPaymentMethod,
@@ -20,7 +20,7 @@ const methodStatuses = new Set<PaymentMethodStatus>([
   "permanently_invalid",
 ]);
 
-export function parsePaymentMethodSetup(value: unknown): PaymentMethodSetup {
+export function parsePaymentMethodSetup(value: unknown): PaymentMethodSetupResponse {
   const object = asObject(value, "Payment method setup");
   const keys = ["id", "status", "expiresAt", "actions"];
   if ("presentationVersion" in object) keys.push("presentationVersion");
@@ -31,7 +31,7 @@ export function parsePaymentMethodSetup(value: unknown): PaymentMethodSetup {
   if (!setupStatuses.has(status)) throw new TypeError("Payment method setup status is invalid");
   const id = nonEmpty(object.id, "id");
   const actions = parseActions(object.actions, id);
-  const setup: PaymentMethodSetup = {
+  const setup: PaymentMethodSetupResponse = {
     id,
     status,
     expiresAt: dateTime(object.expiresAt, "expiresAt"),
@@ -71,7 +71,7 @@ function parsePresentation(value: unknown): { kind: "redirect"; url: string } {
   return { kind: "redirect", url };
 }
 
-function parseActions(value: unknown, id: string): PaymentMethodSetup["actions"] {
+function parseActions(value: unknown, id: string): PaymentMethodSetupResponse["actions"] {
   const object = asObject(value, "Payment method setup actions");
   const keys = ["status"];
   if ("confirm" in object) keys.push("confirm");

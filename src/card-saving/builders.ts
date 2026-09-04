@@ -11,14 +11,12 @@ export interface CardSavingStartState {
 
 interface CardSavingOperations {
   start(state: CardSavingStartState): Promise<CardSavingChallenge>;
-  resume: CardSavingClient["resume"];
   status: CardSavingClient["status"];
 }
 
 export function createCardSavingBuilders(operations: CardSavingOperations): CardSavingClient {
   return Object.freeze({
     ...builderMethods(operations, {}),
-    resume: operations.resume,
     status: operations.status,
   }) as CardSavingClient;
 }

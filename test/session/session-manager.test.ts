@@ -141,7 +141,7 @@ describe("browser application session renewal", () => {
       fetch,
     });
 
-    await expect(client.catalogue.list().get()).rejects.toThrow(/timestamps/);
+    await expect(client.catalogue.list().get()).rejects.toMatchObject({ code: "response_invalid" });
     expect(fetch).toHaveBeenCalledOnce();
   });
 
