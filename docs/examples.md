@@ -44,29 +44,23 @@ if (canonicalCheckout.status === "completed") {
 }
 ```
 
-## Present and resume a payment-method setup
+## Verify a customer and save a card
 
-Create the setup on your confidential backend, then give its provider-neutral response to the
-browser:
+Start the email verification after the customer gives explicit consent:
 
 ```ts
-const handle = buPayment.paymentMethods
-  .setup(setupFromYourBackend)
-  .timeoutMs(10 * 60_000)
-  .onEvent((event) => console.log("Payment method event", event.type))
-  .present();
-
-await handle.completion;
+await buPayment.cardSaving
+  .email("buyer@example.com")
+  .currency("EUR")
+  .consent(true)
+  .start();
 ```
 
-On the hosted redirect's return page, relay the complete query string. The saved setup reference is
-used automatically:
+Use the same operation when the customer returns from the email link and from the hosted vault. The
+SDK reads both return queries and its scoped references internally:
 
 ```ts
-const handle = buPayment.paymentMethods
-  .returnQuery(window.location.search)
-  .timeoutMs(10 * 60_000)
-  .resume();
+const handle = buPayment.cardSaving.resume();
 
 const canonicalSetup = await handle.completion;
 

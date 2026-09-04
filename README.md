@@ -1,6 +1,7 @@
 # @bu-payment/browser-sdk
 
-Browser-safe, provider-neutral access to the BuPayment public catalogue and checkout APIs.
+Browser-safe, provider-neutral access to the BuPayment public catalogue, checkout, and card-saving
+APIs.
 
 ## Install
 
@@ -56,4 +57,4 @@ Start with the [Browser SDK documentation](docs/index.md), then explore:
 - [Errors](docs/errors.md)
 - [Security and limits](docs/security.md)
 - [End-to-end examples](docs/examples.md)
-- [Payment method setups](docs/payment-methods.md)
+- [Card saving](docs/card-saving.md)

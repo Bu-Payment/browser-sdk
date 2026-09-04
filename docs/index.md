@@ -13,8 +13,8 @@ flows in a browser without exposing merchant credentials.
 - [Errors](errors.md)
 - [Security and limits](security.md)
 - [End-to-end examples](examples.md)
-- [Payment method setups](payment-methods.md)
+- [Card saving](card-saving.md)
 
-Every catalogue, checkout, and payment-method operation uses an immutable builder. Calling a
-configuration method returns a new builder, so a configured base can be reused safely for
-independent requests.
+Catalogue and checkout configuration uses immutable builders. Card saving exposes the action-based
+`start()`, `resume()`, and `status()` operations and keeps customer-session and setup references
+internal.

@@ -3,11 +3,29 @@ import { createBuPaymentClient } from "../../src/client";
 import {
   CapabilityDeniedError,
   CheckoutUnavailableError,
+  CustomerSessionExpiredError,
+  CustomerSessionMalformedError,
+  CustomerSessionUnavailableError,
+  CustomerVerificationInvalidError,
+  errorFromResponse,
   IdempotencyConflictError,
   SessionInvalidError,
 } from "../../src/errors";
 
 describe("typed API errors", () => {
+  it.each([
+    [400, "customer_session_malformed", CustomerSessionMalformedError],
+    [401, "customer_verification_invalid", CustomerVerificationInvalidError],
+    [401, "customer_session_expired", CustomerSessionExpiredError],
+    [503, "customer_session_unavailable", CustomerSessionUnavailableError],
+  ])("maps customer error %s to its public type", async (status, code, ErrorType) => {
+    const error = await errorFromResponse(
+      Response.json({ error: code, message: code }, { status }),
+    );
+
+    expect(error).toBeInstanceOf(ErrorType);
+  });
+
   it("maps capability denial without leaking request credentials", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
       if (new URL(String(input)).pathname.endsWith("/application-sessions")) {

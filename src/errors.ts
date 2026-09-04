@@ -40,6 +40,12 @@ export class CheckoutProviderFailedError extends BuPaymentError {}
 export class CheckoutUnavailableError extends BuPaymentError {}
 export class SessionUnavailableError extends BuPaymentError {}
 export class CatalogueUnavailableError extends BuPaymentError {}
+export class CustomerSessionMalformedError extends BuPaymentError {}
+export class CustomerVerificationInvalidError extends BuPaymentError {}
+export class CustomerSessionInvalidError extends BuPaymentError {}
+export class CustomerSessionExpiredError extends BuPaymentError {}
+export class CustomerRateLimitedError extends BuPaymentError {}
+export class CustomerSessionUnavailableError extends BuPaymentError {}
 
 const errorTypes: Record<string, typeof BuPaymentError> = {
   application_session_malformed: SessionMalformedError,
@@ -57,6 +63,12 @@ const errorTypes: Record<string, typeof BuPaymentError> = {
   checkout_provider_failed: CheckoutProviderFailedError,
   checkout_unavailable: CheckoutUnavailableError,
   catalogue_unavailable: CatalogueUnavailableError,
+  customer_session_malformed: CustomerSessionMalformedError,
+  customer_verification_invalid: CustomerVerificationInvalidError,
+  customer_session_invalid: CustomerSessionInvalidError,
+  customer_session_expired: CustomerSessionExpiredError,
+  customer_rate_limited: CustomerRateLimitedError,
+  customer_session_unavailable: CustomerSessionUnavailableError,
 };
 
 export async function errorFromResponse(response: Response): Promise<BuPaymentError> {

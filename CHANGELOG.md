@@ -1,29 +1,22 @@
 # Changelog
 
-## [1.0.0] - 2026-09-04
+## [Unreleased]
 
 ### Changed
 
-- Payment-method operations now use immutable builders with `status()`, `present()`, and `resume()`
-  as terminal methods.
-- Return confirmation is performed internally by `resume()` before canonical status polling.
+- Card saving now uses an immutable, type-state builder ending in `start()` plus root `resume()` and
+  `status()` terminals.
+- `resume()` handles both email-verification and hosted-provider returns from the current URL.
+- Public setup creation, polling, and confirmation attach the required customer session.
 
 ### Removed
 
-- Removed the public `paymentMethods.getStatus()`, `paymentMethods.confirm()`, and
-  `paymentMethods.present()` imperative methods.
-- Removed the argument-based `paymentMethods.resume(reference, options)` signature. Configure
-  `reference()`, `returnQuery()`, and lifecycle options before calling `resume()`.
+- Removed the public `paymentMethods` builder surface and backend-created setup input.
 
 ### Migration
 
 ```ts
-await paymentMethods.reference(reference).signal(signal).status();
-
-const presentation = paymentMethods.setup(setup).timeoutMs(timeoutMs).present();
-
-const resumed = paymentMethods
-  .reference(reference)
-  .returnQuery(window.location.search)
-  .resume();
+await cardSaving.email(email).currency("EUR").consent(true).start();
+const resumed = cardSaving.resume();
+const status = await cardSaving.status();
 ```

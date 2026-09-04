@@ -7,6 +7,7 @@ export interface RequestOptions {
   method?: "GET" | "POST";
   body?: unknown;
   idempotencyKey?: string;
+  customerSessionToken?: string;
   signal?: AbortSignal;
 }
 
@@ -28,6 +29,9 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       const method = request.method ?? "GET";
       const send = async (token: string) => {
         const headers: Record<string, string> = { "Bu-Payment-Session": token };
+        if (request.customerSessionToken) {
+          headers["Bu-Payment-Customer-Session"] = request.customerSessionToken;
+        }
         if (request.body !== undefined) headers["Content-Type"] = "application/json";
         if (request.idempotencyKey) headers["Idempotency-Key"] = request.idempotencyKey;
         const response = await retry.run(
