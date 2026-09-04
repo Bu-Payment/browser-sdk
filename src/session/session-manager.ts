@@ -23,6 +23,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       apiUrl(options.config.apiBaseUrl, "public/v1/application-sessions"),
       {
         method: "POST",
+        credentials: "omit",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ publishableKey: options.config.publishableKey }),
         ...(signal ? { signal } : {}),
@@ -37,6 +38,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       apiUrl(options.config.apiBaseUrl, "public/v1/application-sessions/renew"),
       {
         method: "POST",
+        credentials: "omit",
         headers: { "Bu-Payment-Session": current.token },
         ...(signal ? { signal } : {}),
       },

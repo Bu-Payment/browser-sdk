@@ -11,6 +11,9 @@ const forbidden = [
   /\bBuffer\b/,
   /private[_-]?key/i,
   /client[_-]?secret/i,
+  /providerTransactionId/,
+  /transaction_id/,
+  /channel[_-]?secret/i,
 ];
 for (const pattern of forbidden) {
   if (pattern.test(bundle)) throw new Error(`Browser bundle contains forbidden pattern ${pattern}`);

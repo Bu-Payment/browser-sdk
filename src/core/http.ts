@@ -35,6 +35,7 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
           () =>
             options.fetch(apiUrl(options.config.apiBaseUrl, path), {
               method,
+              credentials: "omit",
               headers,
               ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
               ...(request.signal ? { signal: request.signal } : {}),
