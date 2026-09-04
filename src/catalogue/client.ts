@@ -6,7 +6,13 @@ import {
   assertExactKeys,
   type JsonObject,
 } from "../core/validation";
-import type { CataloguePage, Price, Product } from "./types";
+import type {
+  CataloguePage,
+  CatalogueProductPage,
+  Price,
+  Product,
+  ProductWithPrices,
+} from "./types";
 
 export interface ListOptions {
   cursor?: string;
@@ -18,20 +24,24 @@ export interface PriceListOptions extends ListOptions {
   productId?: string;
 }
 
+export interface CatalogueListBuilder<TProduct extends Product = ProductWithPrices> {
+  cursor(cursor: string): CatalogueListBuilder<TProduct>;
+  limit(limit: number): CatalogueListBuilder<TProduct>;
+  signal(signal: AbortSignal): CatalogueListBuilder<TProduct>;
+  withoutPrices(): CatalogueListBuilder<Product>;
+  get(): Promise<CatalogueProductPage<TProduct>>;
+}
+
 export interface CatalogueClient {
-  listProducts(options?: ListOptions): Promise<CataloguePage<Product>>;
-  getProduct(productId: string, options?: { signal?: AbortSignal }): Promise<Product>;
+  list(options?: ListOptions): CatalogueListBuilder<ProductWithPrices>;
+  getProduct(productId: string, options?: { signal?: AbortSignal }): Promise<ProductWithPrices>;
   listPrices(options?: PriceListOptions): Promise<CataloguePage<Price>>;
 }
 
 export function createCatalogueClient(http: HttpClient): CatalogueClient {
   return {
-    async listProducts(options = {}) {
-      const query = buildListQuery(options);
-      const value = await http.request(`public/v1/catalogue/products${query}`, {
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-      return parsePage(value, parseProduct);
+    list(options = {}) {
+      return new DefaultCatalogueListBuilder(http, { ...options }, parseProductWithPrices, true);
     },
     async getProduct(productId, options = {}) {
       if (!productId) throw new TypeError("productId must not be empty");
@@ -39,7 +49,7 @@ export function createCatalogueClient(http: HttpClient): CatalogueClient {
         `public/v1/catalogue/products/${encodeURIComponent(productId)}`,
         options.signal ? { signal: options.signal } : {},
       );
-      return parseProduct(value);
+      return parseProductWithPrices(value);
     },
     async listPrices(options = {}) {
       const query = buildListQuery(options, options.productId);
@@ -51,7 +61,50 @@ export function createCatalogueClient(http: HttpClient): CatalogueClient {
   };
 }
 
-function buildListQuery(options: ListOptions, productId?: string): string {
+class DefaultCatalogueListBuilder<TProduct extends Product>
+  implements CatalogueListBuilder<TProduct>
+{
+  constructor(
+    private readonly http: HttpClient,
+    private readonly options: Readonly<ListOptions>,
+    private readonly parseItem: (value: unknown) => TProduct,
+    private readonly includePrices: boolean,
+  ) {}
+
+  cursor(cursor: string): CatalogueListBuilder<TProduct> {
+    return this.withOptions({ ...this.options, cursor });
+  }
+
+  limit(limit: number): CatalogueListBuilder<TProduct> {
+    return this.withOptions({ ...this.options, limit });
+  }
+
+  signal(signal: AbortSignal): CatalogueListBuilder<TProduct> {
+    return this.withOptions({ ...this.options, signal });
+  }
+
+  withoutPrices(): CatalogueListBuilder<Product> {
+    return new DefaultCatalogueListBuilder(this.http, this.options, parseProduct, false);
+  }
+
+  async get(): Promise<CatalogueProductPage<TProduct>> {
+    const query = buildListQuery(this.options, undefined, this.includePrices);
+    const value = await this.http.request(`public/v1/catalogue/products${query}`, {
+      ...(this.options.signal ? { signal: this.options.signal } : {}),
+    });
+    const page = parsePage(value, this.parseItem);
+    return {
+      products: page.data,
+      pagination: { nextCursor: page.nextCursor },
+    };
+  }
+
+  private withOptions(options: Readonly<ListOptions>): CatalogueListBuilder<TProduct> {
+    return new DefaultCatalogueListBuilder(this.http, options, this.parseItem, this.includePrices);
+  }
+}
+
+function buildListQuery(options: ListOptions, productId?: string, includePrices?: boolean): string {
   if (
     options.limit !== undefined &&
     (!Number.isInteger(options.limit) || options.limit < 1 || options.limit > 100)
@@ -68,6 +121,7 @@ function buildListQuery(options: ListOptions, productId?: string): string {
     if (!productId.trim()) throw new TypeError("productId must not be empty");
     query.set("productId", productId);
   }
+  if (includePrices === false) query.set("include", "none");
   const value = query.toString();
   return value ? `?${value}` : "";
 }
@@ -92,6 +146,18 @@ function parseProduct(value: unknown): Product {
   };
 }
 
+function parseProductWithPrices(value: unknown): ProductWithPrices {
+  const object = asObject(value, "Product");
+  assertExactKeys(object, ["id", "name", "description", "prices"], "Product");
+  if (!Array.isArray(object.prices)) throw new TypeError("Product prices must be an array");
+  return {
+    id: asString(object.id, "id"),
+    name: asString(object.name, "name"),
+    description: asNullableString(object.description, "description"),
+    prices: object.prices.map(parsePrice),
+  };
+}
+
 function parsePrice(value: unknown): Price {
   const object = asObject(value, "Price");
   assertExactKeys(
@@ -104,23 +170,23 @@ function parsePrice(value: unknown): Price {
   if (!Number.isSafeInteger(object.unitAmount) || Number(object.unitAmount) < 0) {
     throw new TypeError("unitAmount must be a non-negative safe integer");
   }
-  return {
+  const fields = {
     id: asString(object.id, "id"),
     productId: asString(object.productId, "productId"),
     unitAmount: Number(object.unitAmount),
     currency: asString(object.currency, "currency"),
-    type,
-    recurring: parseRecurring(object.recurring, type),
     description: asNullableString(object.description, "description"),
     lookupKey: asNullableString(object.lookupKey, "lookupKey"),
   };
+  if (type === "one_time") {
+    if (object.recurring !== null)
+      throw new TypeError("One-time price recurring value must be null");
+    return { ...fields, type, recurring: null };
+  }
+  return { ...fields, type, recurring: parseRecurring(object.recurring) };
 }
 
-function parseRecurring(value: unknown, type: Price["type"]): Price["recurring"] {
-  if (type === "one_time") {
-    if (value !== null) throw new TypeError("One-time price recurring value must be null");
-    return null;
-  }
+function parseRecurring(value: unknown): Extract<Price, { type: "recurring" }>["recurring"] {
   const object: JsonObject = asObject(value, "Recurring price");
   assertExactKeys(object, ["interval", "intervalCount"], "Recurring price");
   const interval = asString(object.interval, "interval");

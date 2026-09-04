@@ -1,6 +1,23 @@
-export type { CatalogueClient, ListOptions, PriceListOptions } from "./catalogue/client";
-export type { CataloguePage, Price, Product } from "./catalogue/types";
-export type { CheckoutClient, CheckoutRequestOptions } from "./checkout/client";
+export type {
+  CatalogueClient,
+  CatalogueListBuilder,
+  ListOptions,
+  PriceListOptions,
+} from "./catalogue/client";
+export type {
+  CataloguePage,
+  CataloguePagination,
+  CatalogueProductPage,
+  Price,
+  Product,
+  ProductWithPrices,
+} from "./catalogue/types";
+export type {
+  CheckoutBuilder,
+  CheckoutClient,
+  CheckoutReadyBuilder,
+  CheckoutRequestOptions,
+} from "./checkout/client";
 export type {
   CheckoutActions,
   CheckoutCreated,

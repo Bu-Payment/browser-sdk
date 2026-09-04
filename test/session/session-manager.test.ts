@@ -35,10 +35,10 @@ describe("browser application session renewal", () => {
       fetch,
       now: () => now,
     });
-    await client.catalogue.listProducts();
+    await client.catalogue.list().get();
     now = new Date("2026-09-03T12:08:00.000Z");
 
-    await Promise.all([client.catalogue.listProducts(), client.catalogue.listPrices()]);
+    await Promise.all([client.catalogue.list().get(), client.catalogue.listPrices()]);
 
     expect(renewCalls).toBe(1);
   });
@@ -78,10 +78,10 @@ describe("browser application session renewal", () => {
       fetch,
       now: () => now,
     });
-    await client.catalogue.listProducts();
+    await client.catalogue.list().get();
     now = new Date("2026-09-03T12:10:00.000Z");
 
-    await client.catalogue.listProducts();
+    await client.catalogue.list().get();
 
     expect(issueCalls).toBe(2);
   });
@@ -120,7 +120,7 @@ describe("browser application session renewal", () => {
       now: () => new Date("2026-09-03T12:00:00.000Z"),
     });
 
-    await client.catalogue.listProducts();
+    await client.catalogue.list().get();
 
     expect(issueCalls).toBe(2);
     expect(catalogueCalls).toBe(2);
@@ -141,7 +141,7 @@ describe("browser application session renewal", () => {
       fetch,
     });
 
-    await expect(client.catalogue.listProducts()).rejects.toThrow(/timestamps/);
+    await expect(client.catalogue.list().get()).rejects.toThrow(/timestamps/);
     expect(fetch).toHaveBeenCalledOnce();
   });
 
@@ -170,15 +170,18 @@ describe("browser application session renewal", () => {
       apiBaseUrl: "https://api.example.test",
       fetch,
     });
-    const aborted = client.catalogue.listProducts({ signal: controller.signal });
-    const active = client.catalogue.listProducts();
+    const aborted = client.catalogue.list().signal(controller.signal).get();
+    const active = client.catalogue.list().get();
     controller.abort(new DOMException("cancelled", "AbortError"));
     resolveBootstrap?.(
       Response.json(session("shared", "2026-09-03T12:08:00.000Z"), { status: 201 }),
     );
 
     await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
-    await expect(active).resolves.toEqual({ data: [], nextCursor: null });
+    await expect(active).resolves.toEqual({
+      products: [],
+      pagination: { nextCursor: null },
+    });
     expect(
       fetch.mock.calls.filter(([input]) => String(input).endsWith("application-sessions")),
     ).toHaveLength(1);

@@ -35,7 +35,10 @@ describe("typed API errors", () => {
       fetch,
     });
 
-    const error = await client.catalogue.listProducts().catch((caught: unknown) => caught);
+    const error = await client.catalogue
+      .list()
+      .get()
+      .catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(CapabilityDeniedError);
     expect(error).toMatchObject({ code: "application_capability_denied", status: 403 });
@@ -61,7 +64,7 @@ describe("typed API errors", () => {
       fetch,
     });
 
-    await expect(client.catalogue.listProducts()).rejects.toBeInstanceOf(SessionInvalidError);
+    await expect(client.catalogue.list().get()).rejects.toBeInstanceOf(SessionInvalidError);
   });
 
   it.each([

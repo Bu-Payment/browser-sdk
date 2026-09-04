@@ -17,7 +17,7 @@ export interface CheckoutRequestOptions {
   signal?: AbortSignal;
 }
 
-export interface CheckoutClient {
+interface CheckoutOperations {
   create(input: CreateCheckoutInput, options?: CheckoutRequestOptions): Promise<CheckoutCreated>;
   getStatus(reference: string, options?: { signal?: AbortSignal }): Promise<CheckoutLifecycle>;
   redirect(checkout: CheckoutCreated, navigate?: (url: string) => void): void;
@@ -28,23 +28,40 @@ export interface CheckoutClient {
   resume(reference?: string, options?: PresentationOptions): PresentationHandle<CheckoutLifecycle>;
 }
 
+type CheckoutBuilderState = Partial<CreateCheckoutInput & CheckoutRequestOptions>;
+
+interface CheckoutBuilderMethods<TState extends CheckoutBuilderState> {
+  priceId(priceId: string): CheckoutBuilder<TState & Pick<CreateCheckoutInput, "priceId">>;
+  email(email: string): CheckoutBuilder<TState & Pick<CreateCheckoutInput, "email">>;
+  quantity(quantity: number): CheckoutBuilder<TState & Pick<CreateCheckoutInput, "quantity">>;
+  destinationKey(
+    destinationKey: string,
+  ): CheckoutBuilder<TState & Pick<CreateCheckoutInput, "destinationKey">>;
+  idempotencyKey(
+    idempotencyKey: string,
+  ): CheckoutBuilder<TState & Pick<CheckoutRequestOptions, "idempotencyKey">>;
+  signal(signal: AbortSignal): CheckoutBuilder<TState & Pick<CheckoutRequestOptions, "signal">>;
+}
+
+export interface CheckoutReadyBuilder {
+  create(): Promise<CheckoutCreated>;
+}
+
+export type CheckoutBuilder<TState extends CheckoutBuilderState = CheckoutBuilderState> =
+  CheckoutBuilderMethods<TState> &
+    (TState extends CreateCheckoutInput ? CheckoutReadyBuilder : object);
+
+export type CheckoutClient = CheckoutOperations & CheckoutBuilder<Record<never, never>>;
+
 export function createCheckoutClient(
   http: HttpClient,
   resumeStore?: PresentationResumeStore,
 ): CheckoutClient {
   const flights = new Map<string, PresentationHandle<CheckoutLifecycle>>();
   const client: CheckoutClient = {
+    ...createFluentCheckout(http, {}),
     async create(input, options = {}) {
-      const body = parseCreateCheckoutInput(input);
-      const idempotencyKey = options.idempotencyKey ?? generateIdempotencyKey();
-      assertIdempotencyKey(idempotencyKey);
-      const value = await http.request("public/v1/checkouts", {
-        method: "POST",
-        body,
-        idempotencyKey,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-      return parseCheckoutCreated(value);
+      return createCheckout(http, input, options);
     },
     async getStatus(reference, options = {}) {
       if (!reference) throw new TypeError("Checkout reference must not be empty");
@@ -188,6 +205,60 @@ function validateRedirectUrl(value: string): string {
     throw new TypeError("Checkout redirect must use HTTPS without credentials or fragment");
   }
   return url.href;
+}
+
+function createFluentCheckout<TState extends CheckoutBuilderState>(
+  http: HttpClient,
+  state: TState,
+): CheckoutBuilder<TState> {
+  const builder: Record<string, unknown> = {
+    priceId: (priceId: string) => createFluentCheckout(http, { ...state, priceId }),
+    email: (email: string) => createFluentCheckout(http, { ...state, email }),
+    quantity: (quantity: number) => createFluentCheckout(http, { ...state, quantity }),
+    destinationKey: (destinationKey: string) =>
+      createFluentCheckout(http, { ...state, destinationKey }),
+    idempotencyKey: (idempotencyKey: string) =>
+      createFluentCheckout(http, { ...state, idempotencyKey }),
+    signal: (signal: AbortSignal) => createFluentCheckout(http, { ...state, signal }),
+  };
+  if (hasEveryCheckoutField(state)) {
+    builder.create = () =>
+      createCheckout(
+        http,
+        {
+          priceId: state.priceId,
+          email: state.email,
+          quantity: state.quantity,
+          destinationKey: state.destinationKey,
+        },
+        {
+          ...(state.idempotencyKey !== undefined ? { idempotencyKey: state.idempotencyKey } : {}),
+          ...(state.signal ? { signal: state.signal } : {}),
+        },
+      );
+  }
+  return Object.freeze(builder) as CheckoutBuilder<TState>;
+}
+
+function hasEveryCheckoutField(state: CheckoutBuilderState): state is CreateCheckoutInput {
+  return "priceId" in state && "email" in state && "quantity" in state && "destinationKey" in state;
+}
+
+async function createCheckout(
+  http: HttpClient,
+  input: CreateCheckoutInput,
+  options: CheckoutRequestOptions,
+): Promise<CheckoutCreated> {
+  const body = parseCreateCheckoutInput(input);
+  const idempotencyKey = options.idempotencyKey ?? generateIdempotencyKey();
+  assertIdempotencyKey(idempotencyKey);
+  const value = await http.request("public/v1/checkouts", {
+    method: "POST",
+    body,
+    idempotencyKey,
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  return parseCheckoutCreated(value);
 }
 
 function generateIdempotencyKey(): string {

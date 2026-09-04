@@ -36,19 +36,24 @@ token. The SDK does not accept or forward them.
 ## Read the public catalogue
 
 ```ts
-const products = await buPayment.catalogue.listProducts({ limit: 25 });
-const product = await buPayment.catalogue.getProduct(products.data[0].id);
-const prices = await buPayment.catalogue.listPrices({ productId: product.id });
-
-if (products.nextCursor) {
-  await buPayment.catalogue.listProducts({ cursor: products.nextCursor });
-}
+const { products, pagination } = await buPayment.catalogue.list().limit(25).get();
 ```
 
-Cursors are opaque. Product and price responses are validated at runtime and expose only the public
-fields defined by the API.
+Without prices:
+
+```ts
+const { products, pagination } = await buPayment.catalogue.list().withoutPrices().get();
+```
+
+`list()` includes each product's assigned active prices by default in the same HTTP request.
+`withoutPrices()` sends `include=none` when only product metadata is needed. Builders are immutable,
+so a shared base can safely produce independent paginated or price-free queries. The opaque cursor
+for the next page is available as `pagination.nextCursor`. Product and price responses are validated
+at runtime and expose only the public fields defined by the API.
 
 ## Create checkout
+
+Object form:
 
 ```ts
 const checkout = await buPayment.checkout.create({
@@ -59,6 +64,17 @@ const checkout = await buPayment.checkout.create({
 });
 ```
 
+Fluent form (fields may be supplied in any order):
+
+```ts
+const checkout = await buPayment.checkout
+  .priceId("price_public_reference")
+  .email("buyer@example.com")
+  .quantity(1)
+  .destinationKey("default")
+  .create();
+```
+
 The selected server-side price determines whether this is a one-time `payment` or a `subscription`.
 Browser callers cannot choose amount, currency, total, provider, tenant, environment, customer ID,
 or success/cancellation URLs. Email is customer correlation data only; it never authenticates or
@@ -67,11 +83,26 @@ identifies a user of the consuming application.
 Mutations receive a Web Crypto UUID idempotency key automatically. You may supply a stable key when
 coordinating retries yourself:
 
+Object form:
+
 ```ts
 await buPayment.checkout.create(input, {
   idempotencyKey: "storefront-order-018f4f90a4c7",
   signal: abortController.signal,
 });
+```
+
+Fluent form:
+
+```ts
+await buPayment.checkout
+  .priceId("price_public_reference")
+  .email("buyer@example.com")
+  .quantity(1)
+  .destinationKey("default")
+  .idempotencyKey("storefront-order-018f4f90a4c7")
+  .signal(abortController.signal)
+  .create();
 ```
 
 ## Hosted redirect and canonical status
@@ -196,7 +227,7 @@ import {
 } from "@bu-payment/browser-sdk";
 
 try {
-  await buPayment.catalogue.listProducts({ signal: abortController.signal });
+  await buPayment.catalogue.list().signal(abortController.signal).get();
 } catch (error) {
   if (error instanceof CapabilityDeniedError) {
     // The publishable credential does not grant catalogue:read.
