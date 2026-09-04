@@ -99,12 +99,12 @@ describe("typed API errors", () => {
       fetch,
     });
 
-    const promise = client.checkout.create({
-      priceId: "price_1",
-      email: "buyer@example.com",
-      quantity: 1,
-      destinationKey: "default",
-    });
+    const promise = client.checkout
+      .priceId("price_1")
+      .email("buyer@example.com")
+      .quantity(1)
+      .destinationKey("default")
+      .create();
 
     await expect(promise).rejects.toBeInstanceOf(ErrorType);
     expect(requestCount).toBe(status === 503 ? 3 : 1);

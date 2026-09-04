@@ -81,10 +81,12 @@ test("resumes an active modal and Escape cancels without claiming completion", a
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
     document.querySelector<HTMLElement>("#pay")?.focus();
-    const handle = client.checkout.resume("checkout_public", {
-      pollIntervalMs: 10_000,
-      onEvent: (event: { type: string }) => events.push(event),
-    });
+    const handle = client.checkout
+      .resume()
+      .reference("checkout_public")
+      .pollIntervalMs(10_000)
+      .onEvent((event: { type: string }) => events.push(event))
+      .start();
     for (let attempt = 0; !window.modal && attempt < 100; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

@@ -40,7 +40,10 @@ export function createPresentationHandle<T>(
   if (options.timeoutMs !== undefined) {
     timeout = setTimeout(() => abort(timeoutError(), "timed_out"), options.timeoutMs);
   }
-  const completion = operation(controller.signal, emit).finally(() => {
+  const result = controller.signal.aborted
+    ? Promise.reject<T>(controller.signal.reason)
+    : operation(controller.signal, emit);
+  const completion = result.finally(() => {
     terminal = true;
     if (timeout) clearTimeout(timeout);
     options.signal?.removeEventListener("abort", externalAbort);

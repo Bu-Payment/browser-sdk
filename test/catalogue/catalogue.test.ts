@@ -100,7 +100,7 @@ describe("public catalogue", () => {
     type WithoutPricesResult = ReturnType<
       ReturnType<ReturnType<CatalogueClient["list"]>["withoutPrices"]>["get"]
     >;
-    type ProductResult = ReturnType<CatalogueClient["getProduct"]>;
+    type ProductResult = ReturnType<ReturnType<CatalogueClient["product"]>["get"]>;
 
     expectTypeOf<DefaultResult>().toEqualTypeOf<Promise<CatalogueProductPage<ProductWithPrices>>>();
     expectTypeOf<WithoutPricesResult>().toEqualTypeOf<Promise<CatalogueProductPage<Product>>>();
@@ -129,10 +129,7 @@ describe("public catalogue", () => {
       fetch,
     });
 
-    const page = await client.catalogue
-      .list({ limit: 25, cursor: "opaque+/=" })
-      .withoutPrices()
-      .get();
+    const page = await client.catalogue.list().limit(25).cursor("opaque+/=").withoutPrices().get();
 
     expect(page.products[0]).toEqual({ id: "prod_1", name: "Starter", description: null });
     expect(page.pagination.nextCursor).toBe("next");
@@ -156,7 +153,7 @@ describe("public catalogue", () => {
       fetch,
     });
 
-    await expect(client.catalogue.getProduct("product/one")).resolves.toMatchObject({
+    await expect(client.catalogue.product("product/one").get()).resolves.toMatchObject({
       name: "One",
     });
   });
@@ -188,9 +185,74 @@ describe("public catalogue", () => {
       fetch,
     });
 
-    const page = await client.catalogue.listPrices({ productId: "prod_1" });
+    const page = await client.catalogue.prices().productId("prod_1").get();
 
     expect(page.data[0]?.recurring).toEqual({ interval: "month", intervalCount: 1 });
+  });
+
+  it("retrieves product metadata without prices through an immutable builder", async () => {
+    const requestedUrls: URL[] = [];
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/application-sessions")) return Response.json(session);
+      requestedUrls.push(url);
+      return Response.json({ id: "prod_1", name: "Starter", description: null });
+    });
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch,
+    });
+    const base = client.catalogue.product("prod_1");
+    const metadata = base.withoutPrices();
+
+    await expect(metadata.get()).resolves.toEqual({
+      id: "prod_1",
+      name: "Starter",
+      description: null,
+    });
+    expect(base).not.toBe(metadata);
+    expect(Object.isFrozen(base)).toBe(true);
+    expect(requestedUrls[0]?.searchParams.get("include")).toBe("none");
+  });
+
+  it("exposes only catalogue builders", () => {
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch: vi.fn(),
+    });
+
+    expect(client.catalogue).not.toHaveProperty("getProduct");
+    expect(client.catalogue).not.toHaveProperty("listPrices");
+  });
+
+  it("keeps catalogue state and transport private", () => {
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch: vi.fn(),
+    });
+
+    expect(Object.keys(client.catalogue.list()).sort()).toEqual([
+      "cursor",
+      "get",
+      "limit",
+      "signal",
+      "withoutPrices",
+    ]);
+    expect(Object.keys(client.catalogue.product("prod_1")).sort()).toEqual([
+      "get",
+      "signal",
+      "withoutPrices",
+    ]);
+    expect(Object.keys(client.catalogue.prices()).sort()).toEqual([
+      "cursor",
+      "get",
+      "limit",
+      "productId",
+      "signal",
+    ]);
   });
 
   it("fails closed when catalogue responses contain private fields", async () => {

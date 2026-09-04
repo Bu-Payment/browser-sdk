@@ -70,10 +70,13 @@ async function parse(value: unknown) {
     publishableKey: "bup_pk_test_example",
     apiBaseUrl: "https://api.example.test",
     fetch,
-  }).checkout.create(
-    { priceId: "price_1", email: "buyer@example.com", quantity: 1, destinationKey: "default" },
-    { idempotencyKey: "checkout-security-key" },
-  );
+  })
+    .checkout.priceId("price_1")
+    .email("buyer@example.com")
+    .quantity(1)
+    .destinationKey("default")
+    .idempotencyKey("checkout-security-key")
+    .create();
 }
 
 describe("trusted presentation registry", () => {

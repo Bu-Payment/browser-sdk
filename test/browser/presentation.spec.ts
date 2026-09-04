@@ -106,11 +106,12 @@ test("modal keeps callback untrusted and restores focus on Escape", async ({ pag
       expiresAt: "2030-01-01T00:30:00.000Z",
     };
     document.querySelector<HTMLElement>("#pay")?.focus();
-    const handle = client.checkout.present(checkout, {
-      cspNonce: "nonce-value",
-      pollIntervalMs: 20,
-      onEvent: (event: unknown) => events.push(event),
-    });
+    const handle = client.checkout
+      .presentation(checkout)
+      .cspNonce("nonce-value")
+      .pollIntervalMs(20)
+      .onEvent((event: unknown) => events.push(event))
+      .start();
     for (let attempt = 0; !window.modal && attempt < 100; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -249,8 +250,8 @@ test("concurrent modal launches load the trusted script once", async ({ page }) 
       createdAt: "2030-01-01T00:00:00.000Z",
       expiresAt: "2030-01-01T00:30:00.000Z",
     });
-    const first = client.checkout.present(makeCheckout("checkout_one"));
-    const second = client.checkout.present(makeCheckout("checkout_two"));
+    const first = client.checkout.presentation(makeCheckout("checkout_one")).start();
+    const second = client.checkout.presentation(makeCheckout("checkout_two")).start();
     for (let attempt = 0; window.modals?.length !== 2 && attempt < 100; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

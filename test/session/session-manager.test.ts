@@ -38,7 +38,7 @@ describe("browser application session renewal", () => {
     await client.catalogue.list().get();
     now = new Date("2026-09-03T12:08:00.000Z");
 
-    await Promise.all([client.catalogue.list().get(), client.catalogue.listPrices()]);
+    await Promise.all([client.catalogue.list().get(), client.catalogue.prices().get()]);
 
     expect(renewCalls).toBe(1);
   });
