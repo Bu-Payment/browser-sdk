@@ -28,7 +28,7 @@ export type {
 export type { BuPaymentClient, BuPaymentClientOptions } from "./client";
 export type { ErrorCode, OperationKind } from "./constants";
 export type { OperationsClient } from "./operations/client";
-export type { OperationEvent, OperationHandle } from "./operations/types";
+export type { OperationEvent, OperationHandle, ResumedOperation } from "./operations/types";
 export type {
   PaymentMethodSetup,
   PaymentMethodSetupStatus,
