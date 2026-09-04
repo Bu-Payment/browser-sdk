@@ -7,40 +7,34 @@ const projectRoot = resolve(import.meta.dirname, "..");
 execFileSync("bun", ["run", "build"], { cwd: projectRoot, stdio: "inherit" });
 
 const consumerRoot = mkdtempSync(join(tmpdir(), "bu-payment-browser-sdk-consumer-"));
-const archiveName = "bu-payment-browser-sdk.tgz";
-const archivePath = join(consumerRoot, archiveName);
+const archivePath = join(consumerRoot, "bu-payment-browser-sdk.tgz");
 const bunEnvironment = { ...process.env, BUN_INSTALL_CACHE_DIR: join(consumerRoot, ".bun-cache") };
 execFileSync("bun", ["pm", "pack", "--filename", archivePath, "--quiet"], {
   cwd: projectRoot,
   stdio: "inherit",
   env: bunEnvironment,
 });
+
 const publishedPaths = execFileSync("tar", ["-tzf", archivePath], { encoding: "utf8" })
   .trim()
   .split("\n")
-  .map((path) => path.replace(/^package\//, ""))
-  .sort();
-const allowed = [
+  .map((path) => path.replace(/^package\//, ""));
+for (const required of [
   "README.md",
-  "dist/index.d.ts",
   "dist/index.js",
-  "dist/index.js.map",
-  "docs/card-saving.md",
-  "docs/catalogue.md",
-  "docs/checkout.md",
-  "docs/concepts-and-authentication.md",
-  "docs/errors.md",
-  "docs/examples.md",
-  "docs/idempotency.md",
-  "docs/index.md",
-  "docs/lifecycle-and-status.md",
-  "docs/presentation-and-events.md",
-  "docs/resume-and-cancellation.md",
-  "docs/security.md",
+  "dist/index.d.ts",
+  "dist/types.d.ts",
+  "docs/operations-and-events.md",
   "package.json",
-];
-if (JSON.stringify(publishedPaths) !== JSON.stringify(allowed)) {
-  throw new Error(`Unexpected package contents: ${publishedPaths.join(", ")}`);
+]) {
+  if (!publishedPaths.includes(required)) throw new Error(`Missing package file: ${required}`);
+}
+if (
+  publishedPaths.some(
+    (path) => path.includes("superpowers") || path.includes("presentation-and-events"),
+  )
+) {
+  throw new Error("Package contains private planning or removed documentation");
 }
 
 writeFileSync(
@@ -55,85 +49,65 @@ execFileSync("bun", ["add", "--ignore-scripts", archivePath], {
 
 writeFileSync(
   join(consumerRoot, "consumer.mjs"),
-  `import { createBuPaymentClient, SessionInvalidError } from "@bu-payment/browser-sdk";
-if (typeof createBuPaymentClient !== "function") throw new Error("Missing client export");
-if (!(new SessionInvalidError("invalid", { code: "application_session_invalid", status: 401 }) instanceof Error)) throw new Error("Invalid error export");
+  `import { BuPaymentError, createBuPaymentClient, ErrorCode, OperationKind } from "@bu-payment/browser-sdk";
+const runtime = await import("@bu-payment/browser-sdk");
+const expected = ["BuPaymentError", "ErrorCode", "OperationKind", "createBuPaymentClient"];
+if (JSON.stringify(Object.keys(runtime).sort()) !== JSON.stringify(expected)) throw new Error("Unexpected root exports");
+if (OperationKind.CHECKOUT !== "checkout" || ErrorCode.OPERATION_CANCELLED !== "operation_cancelled") throw new Error("Missing runtime constants");
+if (!(new BuPaymentError("cancelled", { code: ErrorCode.OPERATION_CANCELLED }) instanceof Error)) throw new Error("Invalid public error");
 const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test", fetch: async () => Response.json({}) });
-if (typeof client.checkout.presentation !== "function" || typeof client.checkout.resume !== "function" || typeof client.checkout.status !== "function") throw new Error("Missing checkout builder exports");
-if ("present" in client.checkout || "getStatus" in client.checkout || "redirect" in client.checkout) throw new Error("Imperative checkout API was exported");
-if ("getProduct" in client.catalogue || "listPrices" in client.catalogue) throw new Error("Imperative catalogue API was exported");
-if ("start" in client.cardSaving || typeof client.cardSaving.email !== "function" || typeof client.cardSaving.resume !== "function" || typeof client.cardSaving.status !== "function") throw new Error("Invalid card saving builder API");
-const readyCardSaving = client.cardSaving.email("buyer@example.com").currency("EUR").consent(true);
-if (!Object.isFrozen(client.cardSaving) || !Object.isFrozen(readyCardSaving) || typeof readyCardSaving.start !== "function") throw new Error("Card saving builder is not immutable");
-if ("paymentMethods" in client) throw new Error("Legacy payment method API was exported");
+if (typeof client.checkout.open !== "function" || typeof client.checkout.status !== "function") throw new Error("Missing checkout operations");
+if ("presentation" in client.checkout || "resume" in client.checkout || "idempotencyKey" in client.checkout) throw new Error("Legacy checkout API exported");
+if ("resume" in client.cardSaving || typeof client.cardSaving.email !== "function") throw new Error("Legacy card-saving API exported");
+if (typeof client.operations.resume !== "function" || client.operations.resume() !== undefined) throw new Error("Invalid operation resume API");
+const ready = client.checkout.priceId("price").email("buyer@example.com").quantity(1).destinationKey("default");
+if (!Object.isFrozen(client.checkout) || !Object.isFrozen(ready) || typeof ready.start !== "function" || typeof ready.create !== "function") throw new Error("Checkout builder is not immutable");
 `,
 );
-execFileSync("bun", [join(consumerRoot, "consumer.mjs")], {
-  cwd: consumerRoot,
-  stdio: "inherit",
-});
+execFileSync("bun", [join(consumerRoot, "consumer.mjs")], { cwd: consumerRoot, stdio: "inherit" });
 
 writeFileSync(
   join(consumerRoot, "consumer.ts"),
-  `import { createBuPaymentClient, type CataloguePage, type CatalogueProductPage, type CheckoutLifecycle, type CheckoutStatus, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle, type Price, type Product, type ProductWithPrices } from "@bu-payment/browser-sdk";
-const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test" });
-const status: CheckoutStatus = "completed";
-const event: PresentationEvent = { type: "polling", flow: "payment_method_resume", status: "processing" };
-// @ts-expect-error start is unavailable until all required values are configured.
-client.cardSaving.start();
-// @ts-expect-error consent must be the explicit literal true.
-client.cardSaving.email("buyer@example.com").currency("EUR").consent(false);
-const challenge: Promise<{ expiresAt: string }> = client.cardSaving.consent(true).currency("EUR").email("buyer@example.com").timeoutMs(1_000).start();
-const paymentMethodStatus: Promise<PaymentMethodSetup> = client.cardSaving.status();
-const paymentMethodResume: PresentationHandle<PaymentMethodSetup> = client.cardSaving.resume();
-// @ts-expect-error resume has no public options object.
-client.cardSaving.resume({ timeoutMs: 1_000 });
-// @ts-expect-error status has no public options object.
-client.cardSaving.status({ signal: new AbortController().signal });
-const withPrices: Promise<CatalogueProductPage<ProductWithPrices>> = client.catalogue.list().limit(10).get();
-const withoutPrices: Promise<CatalogueProductPage<Product>> = client.catalogue.list().withoutPrices().get();
-const fluentCheckout = client.checkout.destinationKey("default").quantity(1).email("buyer@example.com").idempotencyKey("storefront-order-018f4f90a4c7").priceId("price_public_reference").create();
-const product = client.catalogue.product("product_public_reference").get();
-const prices: Promise<CataloguePage<Price>> = client.catalogue.prices().productId("product_public_reference").get();
-const checkoutLifecycle: Promise<CheckoutLifecycle> = client.checkout.status("checkout_public_reference").get();
-const checkoutHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.presentation({} as never).onEvent(() => {}).timeoutMs(1_000).start();
-const resumeHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.resume().reference("checkout_public_reference").signal(new AbortController().signal).start();
-void event;
-void challenge;
-void paymentMethodStatus;
-void paymentMethodResume;
-void withPrices;
-void withoutPrices;
-void fluentCheckout;
-void product;
-void prices;
-void checkoutLifecycle;
-void checkoutHandle;
-void resumeHandle;
-void status;
+  `import { createBuPaymentClient, ErrorCode, OperationKind } from "@bu-payment/browser-sdk";
+import type { BuPaymentClient, CataloguePage, Checkout, CheckoutResult, ErrorCode as ErrorCodeValue, OperationEvent, OperationHandle, PaymentMethodSetup, Price, Product } from "@bu-payment/browser-sdk/types";
+const client: BuPaymentClient = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test" });
+const event: OperationEvent = { type: "opening", kind: OperationKind.CHECKOUT };
+const code: ErrorCodeValue = ErrorCode.CONFIGURATION_INVALID;
+const resumed: OperationHandle<CheckoutResult | PaymentMethodSetup> | undefined = client.operations.resume();
+const checkout: Promise<Checkout> = client.checkout.priceId("price").email("buyer@example.com").quantity(1).destinationKey("default").create();
+const started: OperationHandle<CheckoutResult> = client.checkout.priceId("price").email("buyer@example.com").quantity(1).destinationKey("default").start();
+const page = {} as CataloguePage<Product | Price>;
+// @ts-expect-error public types are absent from the runtime root.
+type RemovedRootType = import("@bu-payment/browser-sdk").BuPaymentClient;
+// @ts-expect-error specialized errors are removed.
+type RemovedError = import("@bu-payment/browser-sdk").SessionInvalidError;
+// @ts-expect-error start requires all checkout inputs.
+client.checkout.start();
+void event; void code; void resumed; void checkout; void started; void page;
 `,
 );
-execFileSync(
-  "bun",
-  [
-    "x",
-    "tsc",
-    "--noEmit",
-    "--strict",
-    "--skipLibCheck",
-    "--module",
-    "NodeNext",
-    "--moduleResolution",
-    "NodeNext",
-    "--target",
-    "ES2022",
-    join(consumerRoot, "consumer.ts"),
-  ],
-  {
-    cwd: consumerRoot,
-    stdio: "inherit",
-  },
-);
+
+for (const moduleResolution of ["NodeNext", "Bundler"]) {
+  const module = moduleResolution === "NodeNext" ? "NodeNext" : "ESNext";
+  execFileSync(
+    "bun",
+    [
+      "x",
+      "tsc",
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "--module",
+      module,
+      "--moduleResolution",
+      moduleResolution,
+      "--target",
+      "ES2022",
+      join(consumerRoot, "consumer.ts"),
+    ],
+    { cwd: consumerRoot, stdio: "inherit" },
+  );
+}
 
 const installed = JSON.parse(
   readFileSync(

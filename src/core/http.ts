@@ -1,4 +1,5 @@
-import { errorFromResponse, SessionExpiredError, SessionRotatedError } from "../errors";
+import { ErrorCode } from "../constants";
+import { BuPaymentError, errorFromResponse } from "../errors";
 import type { SessionManager } from "../session/session-manager";
 import { apiUrl, type ClientConfig } from "./config";
 import { createRetryPolicy, type RetryPolicy } from "./retry";
@@ -52,8 +53,13 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
       try {
         return await send(token);
       } catch (error) {
-        if (!(error instanceof SessionExpiredError || error instanceof SessionRotatedError))
+        if (!(error instanceof BuPaymentError)) throw error;
+        if (
+          error.code !== ErrorCode.APPLICATION_SESSION_EXPIRED &&
+          error.code !== ErrorCode.APPLICATION_SESSION_ROTATED
+        ) {
           throw error;
+        }
         options.sessions.invalidate(token);
         return send(await options.sessions.getToken(request.signal));
       }

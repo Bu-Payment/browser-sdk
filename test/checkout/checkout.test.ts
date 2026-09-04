@@ -83,7 +83,7 @@ describe("public checkout", () => {
     expect(status.status).toBe("completed");
   });
 
-  it("navigates only to an HTTPS redirect without claiming completion", async () => {
+  it("does not expose provider delivery details on a created checkout", async () => {
     const navigate = vi.fn();
     const client = createBuPaymentClient({
       publishableKey: "bup_pk_test_sample",
@@ -91,32 +91,37 @@ describe("public checkout", () => {
       fetch: createFetch(),
     });
 
-    const handle = client.checkout
-      .presentation(created as never)
-      .navigate(navigate)
-      .start();
+    const checkout = await client.checkout
+      .priceId("price_1")
+      .email("buyer@example.com")
+      .quantity(1)
+      .destinationKey("default")
+      .create();
 
-    expect(navigate).toHaveBeenCalledWith("https://provider.example/checkout/session");
-    handle.cancel();
-    await expect(handle.completion).rejects.toMatchObject({ name: "AbortError" });
+    expect(checkout).not.toHaveProperty("presentation");
+    expect(checkout).not.toHaveProperty("actions");
+    expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("fails closed for insecure or non-redirect presentations", () => {
+  it("fails closed for an insecure redirect response", async () => {
     const client = createBuPaymentClient({
       publishableKey: "bup_pk_test_sample",
       apiBaseUrl: "https://api.example.test",
-      fetch: createFetch(),
+      fetch: createFetch({
+        ...created,
+        presentation: { kind: "redirect", url: "http://provider.example/checkout" },
+        checkoutUrl: "http://provider.example/checkout",
+      }),
     });
 
-    expect(() =>
+    await expect(
       client.checkout
-        .presentation({
-          ...created,
-          presentation: { kind: "redirect", url: "http://provider.example/checkout" },
-          checkoutUrl: "http://provider.example/checkout",
-        } as never)
-        .start(),
-    ).toThrow(/HTTPS/);
+        .priceId("price_1")
+        .email("buyer@example.com")
+        .quantity(1)
+        .destinationKey("default")
+        .create(),
+    ).rejects.toThrow(/HTTPS/);
   });
 
   it("validates modal data without executing the presentation", async () => {
@@ -182,7 +187,8 @@ describe("public checkout", () => {
       .destinationKey("default")
       .create();
 
-    expect(checkout.presentation?.kind).toBe("modal");
+    expect(checkout).toMatchObject({ reference: "bup_co_test_modal", status: "pending" });
+    expect(checkout).not.toHaveProperty("presentation");
   });
 
   it("fails closed when modal callback data does not match the API contract", async () => {
@@ -211,7 +217,7 @@ describe("public checkout", () => {
         .quantity(1)
         .destinationKey("default")
         .create(),
-    ).rejects.toThrow(/Callback action/);
+    ).rejects.toMatchObject({ code: "response_invalid" });
   });
 
   it.each([
@@ -238,6 +244,6 @@ describe("public checkout", () => {
         .quantity(1)
         .destinationKey("default")
         .create(),
-    ).rejects.toBeInstanceOf(TypeError);
+    ).rejects.toMatchObject({ code: "response_invalid" });
   });
 });

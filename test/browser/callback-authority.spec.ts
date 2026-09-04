@@ -32,6 +32,7 @@ test("callback failure cannot override canonical completion", async ({ page }) =
             capabilities: ["checkout:create"],
           });
         }
+        if (path.endsWith("/checkouts")) return Response.json(checkout);
         if (path.endsWith("/callback")) {
           callbackStarted = true;
           throw new Error("callback transport failed");
@@ -50,7 +51,10 @@ test("callback failure cannot override canonical completion", async ({ page }) =
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
     const handle = client.checkout
-      .presentation(checkout)
+      .priceId("price")
+      .email("buyer@example.com")
+      .quantity(1)
+      .destinationKey("default")
       .pollIntervalMs(0)
       .onEvent((event: { type: string }) => events.push(event))
       .start();
@@ -70,6 +74,6 @@ test("callback failure cannot override canonical completion", async ({ page }) =
 
   expect(observed.status).toBe("completed");
   expect(observed.terminals).toEqual([
-    { type: "completed", flow: "checkout_modal", status: "completed" },
+    { type: "completed", kind: "checkout", status: "completed" },
   ]);
 });

@@ -1,11 +1,9 @@
-# Concepts and browser-safe authentication
+# Concepts and configuration
 
-The Browser SDK authenticates an application, not its shoppers. Your storefront login, session,
-roles, and user credentials remain entirely outside BuPayment.
+The Browser SDK authenticates an application, not its shoppers. Create one client with raw SDK
+configuration:
 
-Create one client for an API URL and publishable application key:
-
-```ts
+```js
 import { createBuPaymentClient } from "@bu-payment/browser-sdk";
 
 const buPayment = createBuPaymentClient({
@@ -14,19 +12,11 @@ const buPayment = createBuPaymentClient({
 });
 ```
 
-The SDK exchanges the publishable key for a short-lived, capability-scoped application session.
-The session token remains in memory. Concurrent requests share session bootstrap and early renewal.
+Client creation trims and validates the key, normalizes the API URL, enforces HTTPS except for
+loopback development, and rejects explicit Test/Live mismatches. Both Test and Live environments
+are supported. Failures use `BuPaymentError` with `ErrorCode.CONFIGURATION_INVALID` and do not echo
+sensitive values.
 
-A publishable key is safe to embed in browser code, but it does not identify or authenticate a
-shopper. Never pass a dashboard JWT, application secret, HMAC key, provider credential, or shopper
-token to the SDK. The client does not accept or forward them.
-
-All commerce APIs use immutable builders. Configuration methods return a new builder and perform no
-network or presentation work. Only a terminal method such as `get()`, `create()`, `status()`,
-`present()`, `resume()`, or `start()` begins the operation.
-
-## Browser requirements
-
-The SDK requires modern browser implementations of Fetch, Web Crypto, URL, URLSearchParams, and
-AbortController. `apiBaseUrl` must use HTTPS, except that loopback HTTP is accepted for local
-development. Credentials, query parameters, and fragments are not accepted in the base URL.
+The SDK exchanges the key for a short-lived application session held only in memory. Concurrent
+requests share bootstrap and renewal. Storefront login, roles, dashboard configuration, and user
+credentials remain outside the SDK.

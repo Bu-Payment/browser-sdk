@@ -22,12 +22,16 @@
   "files": [
     "dist",
     "docs",
+    "!docs/superpowers",
     "README.md"
   ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./types": {
+      "types": "./dist/types.d.ts"
     }
   },
   "types": "./dist/index.d.ts",

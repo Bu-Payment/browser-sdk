@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { createBuPaymentClient, type PaymentMethodSetup } from "../../src";
+import { createBuPaymentClient } from "../../src";
+import type { PaymentMethodSetupResponse } from "../../src/payment-methods/types";
 
 const applicationSession = {
   token: "application-session",
@@ -15,7 +16,7 @@ const customerSession = {
   token: `bup_cs_test_${"a".repeat(43)}`,
   expiresAt: "2030-01-01T00:20:00.000Z",
 };
-const setup: PaymentMethodSetup = {
+const setup: PaymentMethodSetupResponse = {
   id: "setup_opaque",
   status: "requires_action",
   expiresAt: "2030-01-01T00:15:00.000Z",
@@ -26,7 +27,7 @@ const setup: PaymentMethodSetup = {
     confirm: { method: "POST", url: "/public/v1/payment-method-setups/setup_opaque/confirm" },
   },
 };
-const succeeded: PaymentMethodSetup = {
+const succeeded: PaymentMethodSetupResponse = {
   id: "setup_opaque",
   status: "succeeded",
   expiresAt: "2030-01-01T00:15:00.000Z",
@@ -100,8 +101,11 @@ describe("card saving", () => {
       .mockResolvedValueOnce(json(setup, 201))
       .mockResolvedValueOnce(json(succeeded));
 
-    const handle = client(fetch, storage).cardSaving.resume();
-    await expect(handle.completion).resolves.toMatchObject({ status: "succeeded" });
+    const handle = client(fetch, storage).operations.resume();
+    expect(handle).toBeDefined();
+    await expect(handle?.completion).resolves.toMatchObject({ status: "succeeded" });
+    expect(await handle?.completion).not.toHaveProperty("presentation");
+    expect(await handle?.completion).not.toHaveProperty("actions");
 
     expect(request(fetch, 1)).toMatchObject({
       path: `/public/v1/customer-email-challenges/${challenge.reference}/verify`,
@@ -128,7 +132,9 @@ describe("card saving", () => {
       .mockResolvedValueOnce(json(applicationSession, 201))
       .mockResolvedValueOnce(json(succeeded));
 
-    await expect(client(fetch, storage).cardSaving.status()).resolves.toEqual(succeeded);
+    const result = await client(fetch, storage).cardSaving.status();
+    expect(result).toMatchObject({ id: succeeded.id, status: "succeeded" });
+    expect(result).not.toHaveProperty("actions");
     expect(request(fetch, 1).headers.get("Bu-Payment-Customer-Session")).toBe(
       customerSession.token,
     );
@@ -160,12 +166,12 @@ describe("card saving", () => {
       .mockResolvedValueOnce(json(setup, 201))
       .mockResolvedValueOnce(json(succeeded));
 
-    await client(fetch, storage).cardSaving.resume().completion;
+    await client(fetch, storage).operations.resume()?.completion;
 
     expect(replaceState).toHaveBeenCalledWith(
       { page: "cards" },
       "",
-      "https://shop.example/account/cards?keep=1",
+      "https://shop.example/account/cards",
     );
   });
 
@@ -178,9 +184,9 @@ describe("card saving", () => {
       .mockResolvedValueOnce(json(setup))
       .mockResolvedValueOnce(json(succeeded));
 
-    const result = await client(fetch, storage).cardSaving.resume().completion;
+    const result = await client(fetch, storage).operations.resume()?.completion;
 
-    expect(result.status).toBe("succeeded");
+    expect(result?.status).toBe("succeeded");
     const confirmation = request(fetch, 1);
     expect(confirmation.path).toBe("/public/v1/payment-method-setups/setup_opaque/confirm");
     expect(confirmation.body).toEqual({ returnQuery: "?opaque=provider&status=untrusted" });
@@ -211,10 +217,11 @@ async function storedActiveFlow(): Promise<MemoryStorage> {
     .mockResolvedValueOnce(json(customerSession, 201))
     .mockResolvedValueOnce(json(setup, 201))
     .mockResolvedValue(json(setup));
-  const handle = client(fetch, storage).cardSaving.resume();
+  const handle = client(fetch, storage).operations.resume();
+  expect(handle).toBeDefined();
   await vi.waitFor(() => expect(storage.serialized()).toContain(setup.id));
-  handle.cancel();
-  await handle.completion.catch(() => undefined);
+  handle?.cancel();
+  await handle?.completion.catch(() => undefined);
   return storage;
 }
 
@@ -237,6 +244,7 @@ function stubLocation(href: string, assign = vi.fn()) {
     hash: url.hash,
     assign,
   });
+  vi.stubGlobal("history", { state: null, replaceState: vi.fn() });
 }
 
 function request(fetch: ReturnType<typeof vi.fn>, index: number) {

@@ -1,29 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBuPaymentClient } from "../../src/client";
-import {
-  CapabilityDeniedError,
-  CheckoutUnavailableError,
-  CustomerSessionExpiredError,
-  CustomerSessionMalformedError,
-  CustomerSessionUnavailableError,
-  CustomerVerificationInvalidError,
-  errorFromResponse,
-  IdempotencyConflictError,
-  SessionInvalidError,
-} from "../../src/errors";
+import { ErrorCode } from "../../src/constants";
+import { BuPaymentError, errorFromResponse } from "../../src/errors";
 
 describe("typed API errors", () => {
   it.each([
-    [400, "customer_session_malformed", CustomerSessionMalformedError],
-    [401, "customer_verification_invalid", CustomerVerificationInvalidError],
-    [401, "customer_session_expired", CustomerSessionExpiredError],
-    [503, "customer_session_unavailable", CustomerSessionUnavailableError],
-  ])("maps customer error %s to its public type", async (status, code, ErrorType) => {
+    [400, "customer_session_malformed", ErrorCode.CUSTOMER_SESSION_MALFORMED],
+    [401, "customer_verification_invalid", ErrorCode.CUSTOMER_VERIFICATION_INVALID],
+    [401, "customer_session_expired", ErrorCode.CUSTOMER_SESSION_EXPIRED],
+    [503, "customer_session_unavailable", ErrorCode.CUSTOMER_SESSION_UNAVAILABLE],
+  ])("maps customer error %s to the stable code", async (status, apiCode, code) => {
     const error = await errorFromResponse(
-      Response.json({ error: code, message: code }, { status }),
+      Response.json({ error: apiCode, message: apiCode }, { status }),
     );
 
-    expect(error).toBeInstanceOf(ErrorType);
+    expect(error).toBeInstanceOf(BuPaymentError);
+    expect(error.code).toBe(code);
+    expect(error.constructor).toBe(BuPaymentError);
   });
 
   it("maps capability denial without leaking request credentials", async () => {
@@ -48,7 +41,7 @@ describe("typed API errors", () => {
       );
     });
     const client = createBuPaymentClient({
-      publishableKey: "secret-publishable-key",
+      publishableKey: "bup_pk_test_secret-publishable-key",
       apiBaseUrl: "https://api.example.test",
       fetch,
     });
@@ -58,7 +51,7 @@ describe("typed API errors", () => {
       .get()
       .catch((caught: unknown) => caught);
 
-    expect(error).toBeInstanceOf(CapabilityDeniedError);
+    expect(error).toBeInstanceOf(BuPaymentError);
     expect(error).toMatchObject({ code: "application_capability_denied", status: 403 });
     expect(JSON.stringify(error)).not.toContain("secret-");
   });
@@ -82,13 +75,15 @@ describe("typed API errors", () => {
       fetch,
     });
 
-    await expect(client.catalogue.list().get()).rejects.toBeInstanceOf(SessionInvalidError);
+    await expect(client.catalogue.list().get()).rejects.toMatchObject({
+      code: ErrorCode.APPLICATION_SESSION_INVALID,
+    });
   });
 
   it.each([
-    [409, "idempotency_conflict", IdempotencyConflictError],
-    [503, "checkout_unavailable", CheckoutUnavailableError],
-  ])("maps HTTP %i %s to a domain error", async (status, code, ErrorType) => {
+    [409, "idempotency_conflict", ErrorCode.IDEMPOTENCY_CONFLICT],
+    [503, "checkout_unavailable", ErrorCode.CHECKOUT_UNAVAILABLE],
+  ])("maps HTTP %i %s to a stable code", async (status, apiCode, code) => {
     let requestCount = 0;
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
       if (new URL(String(input)).pathname.endsWith("/application-sessions")) {
@@ -103,8 +98,8 @@ describe("typed API errors", () => {
       return Response.json(
         {
           statusCode: status,
-          error: code,
-          message: code,
+          error: apiCode,
+          message: apiCode,
           requestId: "7c38a433-15ce-42ce-8095-02c60fe66718",
           timestamp: "2026-09-03T12:00:00.000Z",
         },
@@ -124,7 +119,26 @@ describe("typed API errors", () => {
       .destinationKey("default")
       .create();
 
-    await expect(promise).rejects.toBeInstanceOf(ErrorType);
+    await expect(promise).rejects.toMatchObject({ code });
     expect(requestCount).toBe(status === 503 ? 3 : 1);
+  });
+
+  it("serializes only stable safe diagnostics", () => {
+    const error = new BuPaymentError("wording is not contractual", {
+      code: ErrorCode.RESUME_FAILED,
+      status: 409,
+      requestId: "request-id",
+      cause: new Error("secret provider query"),
+      metadata: { operation: "checkout" },
+    });
+
+    expect(error.toJSON()).toEqual({
+      name: "BuPaymentError",
+      code: ErrorCode.RESUME_FAILED,
+      status: 409,
+      requestId: "request-id",
+      metadata: { operation: "checkout" },
+    });
+    expect(JSON.stringify(error)).not.toContain("provider query");
   });
 });

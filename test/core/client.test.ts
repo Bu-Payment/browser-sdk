@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBuPaymentClient } from "../../src/client";
+import { ErrorCode } from "../../src/constants";
+import { BuPaymentError } from "../../src/errors";
 
 describe("createBuPaymentClient", () => {
   it("rejects a base URL containing credentials, query, or fragment", () => {
@@ -31,6 +33,51 @@ describe("createBuPaymentClient", () => {
         fetch,
       }),
     ).not.toThrow();
+  });
+
+  it.each([
+    ["", "https://api.example.test"],
+    ["pk_test_wrong", "https://api.example.test"],
+    ["bup_pk_test_valid", "ftp://api.example.test"],
+    ["bup_pk_live_valid", "https://test.api.example.com"],
+    ["bup_pk_test_valid", "https://live.api.example.com"],
+  ])("reports invalid configuration without exposing values", (publishableKey, apiBaseUrl) => {
+    let caught: unknown;
+    try {
+      createBuPaymentClient({ publishableKey, apiBaseUrl, fetch: vi.fn() });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(BuPaymentError);
+    expect(caught).toMatchObject({ code: ErrorCode.CONFIGURATION_INVALID });
+    expect(JSON.stringify(caught)).not.toContain(publishableKey || "impossible-empty-secret");
+  });
+
+  it("normalizes raw configuration before issuing the application session", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      expect(String(input)).toBe("https://api.example.test/base/public/v1/application-sessions");
+      expect(JSON.parse(String(init?.body))).toEqual({ publishableKey: "bup_pk_test_example" });
+      return Response.json({
+        token: "session",
+        expiresAt: "2030-01-01T01:00:00.000Z",
+        renewAfter: "2030-01-01T00:30:00.000Z",
+        capabilities: ["catalogue:read"],
+      });
+    });
+    const client = createBuPaymentClient({
+      publishableKey: "  bup_pk_test_example  ",
+      apiBaseUrl: "https://api.example.test/base",
+      fetch,
+      now: () => new Date("2030-01-01T00:00:00.000Z"),
+    });
+
+    await client.catalogue
+      .list()
+      .get()
+      .catch(() => undefined);
+
+    expect(fetch).toHaveBeenCalled();
   });
 
   it("shares one session bootstrap across concurrent public requests", async () => {

@@ -1,5 +1,4 @@
 import type { PaymentMethodSetup } from "../payment-methods/types";
-import type { PresentationHandle } from "../presentation/types";
 
 export interface CardSavingChallenge {
   expiresAt: string;
@@ -32,6 +31,5 @@ export type CardSavingBuilder<
     : object);
 
 export interface CardSavingClient extends CardSavingBuilder {
-  resume(): PresentationHandle<PaymentMethodSetup>;
   status(): Promise<PaymentMethodSetup>;
 }

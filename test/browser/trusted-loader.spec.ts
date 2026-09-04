@@ -34,7 +34,7 @@ test("ignores an untrusted preexisting modal constructor", async ({ page }) => {
     const client = createBuPaymentClient({
       publishableKey: "bup_pk_test_example",
       apiBaseUrl: "https://api.example.test",
-      fetch: async (url: URL | RequestInfo) => {
+      fetch: async (url: URL | RequestInfo, init?: RequestInit) => {
         if (url.toString().endsWith("/application-sessions")) {
           return Response.json({
             token: "session-token",
@@ -43,11 +43,18 @@ test("ignores an untrusted preexisting modal constructor", async ({ page }) => {
             capabilities: ["checkout:create"],
           });
         }
+        if (init?.method === "POST") return Response.json(input);
         return Response.json({ ...input, updatedAt: "2030-01-01T00:01:00.000Z" });
       },
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
-    const handle = client.checkout.presentation(input).pollIntervalMs(10_000).start();
+    const handle = client.checkout
+      .priceId("price")
+      .email("buyer@example.com")
+      .quantity(1)
+      .destinationKey("default")
+      .pollIntervalMs(10_000)
+      .start();
     for (let attempt = 0; !state.trustedConstructorUsed && attempt < 100; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

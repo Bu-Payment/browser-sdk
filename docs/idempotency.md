@@ -1,24 +1,15 @@
-# Idempotency
+# Automatic checkout idempotency
 
-Checkout creation always carries an idempotency key. By default the SDK generates a Web Crypto UUID.
-Supply a stable key when your application needs retries of the same checkout intent to converge on
-one server operation:
+Checkout creation always carries an SDK-generated idempotency key. Applications do not create,
+hash, store, or supply one.
 
-```ts
-const checkout = await buPayment.checkout
-  .priceId("price_public_reference")
-  .email("buyer@example.com")
-  .quantity(1)
-  .destinationKey("default")
-  .idempotencyKey("storefront-order-018f4f90a4c7")
-  .create();
-```
+The SDK correlates the canonical checkout intent, reuses a key after an ambiguous network result,
+and clears recovery after a confirmed response. Concurrent creation of the same intent shares one
+request. A changed price, normalized email, quantity, or destination receives a different key.
 
-Explicit keys must contain 16 through 200 printable ASCII characters. Reuse a key only for the same
-logical input. If the key is reused with a different input, the API reports
-`IdempotencyConflictError`.
+Recovery records are versioned, expire after 15 minutes, and are scoped to browser origin, API URL,
+publishable key, and checkout operation kind. They contain only an opaque intent digest, UUID, and
+expiry. The digest is sensitive pseudonymous data. Raw email, credentials, session tokens, provider
+return data, and server responses are never persisted.
 
-GET requests retry bounded transient network, rate-limit, and service failures. Mutations retry only
-when protected by an idempotency key; checkout creation always is. The default policy makes at most
-three attempts with exponential backoff, honors `Retry-After` up to 30 seconds, and never retries an
-aborted operation.
+Blocked or unavailable browser storage does not prevent an ordinary checkout from starting.

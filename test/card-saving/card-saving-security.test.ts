@@ -41,14 +41,14 @@ describe("card saving state security", () => {
         ),
       );
 
-    await expect(sdk(fetch, storage).cardSaving.resume().completion).rejects.toBeInstanceOf(
-      TypeError,
-    );
+    await expect(sdk(fetch, storage).operations.resume()?.completion).rejects.toMatchObject({
+      code: "response_invalid",
+    });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(storage.serialized()).not.toContain("not-a-customer-session");
   });
 
-  test("rejects expired persisted state without making a card-saving request", async () => {
+  test("scrubs and rejects an expired verification return without a request", async () => {
     const storage = new MemoryStorage();
     location("https://shop.example/cards");
     const startFetch = vi
@@ -65,8 +65,9 @@ describe("card saving state security", () => {
     const fetch = vi.fn();
 
     await expect(
-      sdk(fetch, storage, "2030-01-01T00:11:00.000Z").cardSaving.resume().completion,
-    ).rejects.toThrow("No pending card saving verification");
+      sdk(fetch, storage, "2030-01-01T00:11:00.000Z").operations.resume()?.completion,
+    ).rejects.toMatchObject({ code: "resume_failed" });
+    expect(history.replaceState).toHaveBeenCalledTimes(1);
     expect(fetch).not.toHaveBeenCalled();
   });
 });

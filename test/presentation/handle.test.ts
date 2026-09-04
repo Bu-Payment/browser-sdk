@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { ErrorCode, OperationKind } from "../../src/constants";
 import { createPresentationHandle } from "../../src/presentation/handle";
 
 test("emits opening before cancellation for a pre-aborted signal", async () => {
@@ -16,7 +17,22 @@ test("emits opening before cancellation for a pre-aborted signal", async () => {
     operation,
   );
 
-  await expect(handle.completion).rejects.toMatchObject({ name: "AbortError" });
+  await expect(handle.completion).rejects.toMatchObject({ code: ErrorCode.OPERATION_CANCELLED });
+  expect(handle.kind).toBe(OperationKind.CHECKOUT);
   expect(events).toEqual(["opening", "cancelled"]);
   expect(operation).not.toHaveBeenCalled();
+});
+
+test("reports timeout through a stable operation code", async () => {
+  const handle = createPresentationHandle(
+    "payment_method_resume",
+    { timeoutMs: 1 },
+    (signal) =>
+      new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+  );
+
+  await expect(handle.completion).rejects.toMatchObject({ code: ErrorCode.OPERATION_TIMED_OUT });
+  expect(handle.kind).toBe(OperationKind.CARD_SAVING);
 });

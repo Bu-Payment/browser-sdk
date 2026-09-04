@@ -1,6 +1,7 @@
+import { ErrorCode } from "../constants";
 import { apiUrl, type ClientConfig } from "../core/config";
 import { asObject, asString, assertExactKeys } from "../core/validation";
-import { errorFromResponse, SessionExpiredError, SessionRotatedError } from "../errors";
+import { BuPaymentError, errorFromResponse, toBuPaymentError } from "../errors";
 import type { BrowserApplicationSession, BrowserCapability } from "./types";
 
 interface SessionManagerOptions {
@@ -30,7 +31,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       },
     );
     if (!response.ok) throw await errorFromResponse(response);
-    return parseSession(await response.json());
+    return parseSessionResponse(await response.json());
   }
 
   async function renew(current: BrowserApplicationSession, signal?: AbortSignal) {
@@ -44,7 +45,7 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       },
     );
     if (!response.ok) throw await errorFromResponse(response);
-    return parseSession(await response.json());
+    return parseSessionResponse(await response.json());
   }
 
   async function refresh(signal?: AbortSignal): Promise<BrowserApplicationSession> {
@@ -52,7 +53,11 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
     try {
       return await renew(session, signal);
     } catch (error) {
-      if (error instanceof SessionRotatedError || error instanceof SessionExpiredError) {
+      if (
+        error instanceof BuPaymentError &&
+        (error.code === ErrorCode.APPLICATION_SESSION_ROTATED ||
+          error.code === ErrorCode.APPLICATION_SESSION_EXPIRED)
+      ) {
         session = undefined;
         return issue(signal);
       }
@@ -73,6 +78,18 @@ export function createSessionManager(options: SessionManagerOptions): SessionMan
       if (session?.token === token) session = undefined;
     },
   };
+}
+
+function parseSessionResponse(value: unknown): BrowserApplicationSession {
+  try {
+    return parseSession(value);
+  } catch (error) {
+    throw toBuPaymentError(
+      error,
+      ErrorCode.RESPONSE_INVALID,
+      "Application session response is invalid",
+    );
+  }
 }
 
 function waitForCaller<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {

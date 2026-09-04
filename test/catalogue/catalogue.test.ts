@@ -271,8 +271,8 @@ describe("public catalogue", () => {
       fetch,
     });
 
-    await expect(client.catalogue.list().withoutPrices().get()).rejects.toThrow(
-      /unexpected fields/,
-    );
+    await expect(client.catalogue.list().withoutPrices().get()).rejects.toMatchObject({
+      code: "response_invalid",
+    });
   });
 });
