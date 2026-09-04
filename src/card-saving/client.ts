@@ -10,10 +10,10 @@ import { createPresentationHandle } from "../presentation/handle";
 import { pollCanonical } from "../presentation/poll";
 import { type CardSavingStartState, createCardSavingBuilders } from "./builders";
 import { cardSavingRequestSignal } from "./request-signal";
+import { cardSavingVerificationParameter, hasCardSavingVerificationQuery } from "./resume-query";
 import type { CardSavingStore } from "./store";
 import type { CardSavingChallenge, CardSavingClient } from "./types";
 
-const verificationParameter = "bu_customer_verification_token";
 const terminals = new Set(["succeeded", "failed", "expired"]);
 const successes = new Set(["succeeded"]);
 
@@ -48,12 +48,12 @@ export function createCardSavingOperations(
   return {
     client,
     canResume(search) {
-      if (new URLSearchParams(search).has(verificationParameter)) return true;
+      if (hasCardSavingVerificationQuery(search)) return true;
       return Boolean(store.readSetup() && store.readCustomer());
     },
     resume(search) {
       if (active) return active;
-      const verificationToken = new URLSearchParams(search).get(verificationParameter);
+      const verificationToken = new URLSearchParams(search).get(cardSavingVerificationParameter);
       if (verificationToken !== null) assertVerificationToken(verificationToken);
       let handle: OperationHandle<PaymentMethodSetup>;
       handle = createPresentationHandle("payment_method_resume", {}, async (signal, emit) => {

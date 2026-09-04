@@ -69,11 +69,13 @@ execFileSync("bun", [join(consumerRoot, "consumer.mjs")], { cwd: consumerRoot, s
 writeFileSync(
   join(consumerRoot, "consumer.ts"),
   `import { createBuPaymentClient, ErrorCode, OperationKind } from "@bu-payment/browser-sdk";
-import type { BuPaymentClient, CataloguePage, Checkout, CheckoutResult, ErrorCode as ErrorCodeValue, OperationEvent, OperationHandle, PaymentMethodSetup, Price, Product } from "@bu-payment/browser-sdk/types";
+import type { BuPaymentClient, CataloguePage, Checkout, CheckoutResult, ErrorCode as ErrorCodeValue, OperationEvent, OperationHandle, Price, Product, ResumedOperation } from "@bu-payment/browser-sdk/types";
 const client: BuPaymentClient = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test" });
 const event: OperationEvent = { type: "opening", kind: OperationKind.CHECKOUT };
 const code: ErrorCodeValue = ErrorCode.CONFIGURATION_INVALID;
-const resumed: OperationHandle<CheckoutResult | PaymentMethodSetup> | undefined = client.operations.resume();
+const resumed: ResumedOperation | undefined = client.operations.resume();
+if (resumed?.kind === OperationKind.CHECKOUT) resumed.completion.then((value) => value.reference);
+if (resumed?.kind === OperationKind.CARD_SAVING) resumed.completion.then((value) => value.id);
 const checkout: Promise<Checkout> = client.checkout.priceId("price").email("buyer@example.com").quantity(1).destinationKey("default").create();
 const started: OperationHandle<CheckoutResult> = client.checkout.priceId("price").email("buyer@example.com").quantity(1).destinationKey("default").start();
 const page = {} as CataloguePage<Product | Price>;
