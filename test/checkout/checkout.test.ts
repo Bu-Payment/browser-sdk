@@ -40,12 +40,12 @@ describe("public checkout", () => {
       fetch,
     });
 
-    const checkout = await client.checkout.create({
-      priceId: "price_1",
-      email: "buyer@example.com",
-      quantity: 2,
-      destinationKey: "default",
-    });
+    const checkout = await client.checkout
+      .priceId("price_1")
+      .email("buyer@example.com")
+      .quantity(2)
+      .destinationKey("default")
+      .create();
 
     const [, init] = fetch.mock.calls.at(-1) ?? [];
     expect(JSON.parse(String(init?.body))).toEqual({
@@ -57,26 +57,6 @@ describe("public checkout", () => {
     expect(new Headers(init?.headers).get("Idempotency-Key")).toMatch(/^[!-~]{16,200}$/);
     expect(new Headers(init?.headers).has("Authorization")).toBe(false);
     expect(checkout).toMatchObject({ type: "payment", status: "pending" });
-  });
-
-  it("rejects browser-supplied financial authority before making checkout request", async () => {
-    const fetch = createFetch();
-    const client = createBuPaymentClient({
-      publishableKey: "bup_pk_test_sample",
-      apiBaseUrl: "https://api.example.test",
-      fetch,
-    });
-
-    await expect(
-      client.checkout.create({
-        priceId: "price_1",
-        email: "buyer@example.com",
-        quantity: 1,
-        destinationKey: "default",
-        amount: 1,
-      } as never),
-    ).rejects.toThrow(/unexpected fields/);
-    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("reads canonical status by an encoded opaque reference", async () => {
@@ -97,13 +77,13 @@ describe("public checkout", () => {
       fetch,
     });
 
-    const status = await client.checkout.getStatus("opaque/reference");
+    const status = await client.checkout.status("opaque/reference").get();
 
     expect(new URL(String(fetch.mock.calls.at(-1)?.[0])).pathname).toContain("opaque%2Freference");
     expect(status.status).toBe("completed");
   });
 
-  it("navigates only to an HTTPS redirect without claiming completion", () => {
+  it("navigates only to an HTTPS redirect without claiming completion", async () => {
     const navigate = vi.fn();
     const client = createBuPaymentClient({
       publishableKey: "bup_pk_test_sample",
@@ -111,10 +91,14 @@ describe("public checkout", () => {
       fetch: createFetch(),
     });
 
-    const result = client.checkout.redirect(created as never, navigate);
+    const handle = client.checkout
+      .presentation(created as never)
+      .navigate(navigate)
+      .start();
 
     expect(navigate).toHaveBeenCalledWith("https://provider.example/checkout/session");
-    expect(result).toBeUndefined();
+    handle.cancel();
+    await expect(handle.completion).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("fails closed for insecure or non-redirect presentations", () => {
@@ -125,15 +109,14 @@ describe("public checkout", () => {
     });
 
     expect(() =>
-      client.checkout.redirect({
-        ...created,
-        presentation: { kind: "redirect", url: "http://provider.example/checkout" },
-        checkoutUrl: "http://provider.example/checkout",
-      } as never),
+      client.checkout
+        .presentation({
+          ...created,
+          presentation: { kind: "redirect", url: "http://provider.example/checkout" },
+          checkoutUrl: "http://provider.example/checkout",
+        } as never)
+        .start(),
     ).toThrow(/HTTPS/);
-    expect(() =>
-      client.checkout.redirect({ ...created, presentation: { kind: "modal" } } as never),
-    ).toThrow(/not a redirect/);
   });
 
   it("validates modal data without executing the presentation", async () => {
@@ -192,15 +175,14 @@ describe("public checkout", () => {
       fetch: createFetch(modal),
     });
 
-    const checkout = await client.checkout.create({
-      priceId: "price_1",
-      email: "buyer@example.com",
-      quantity: 1,
-      destinationKey: "default",
-    });
+    const checkout = await client.checkout
+      .priceId("price_1")
+      .email("buyer@example.com")
+      .quantity(1)
+      .destinationKey("default")
+      .create();
 
     expect(checkout.presentation?.kind).toBe("modal");
-    expect(() => client.checkout.redirect(checkout)).toThrow(/not a redirect/);
   });
 
   it("fails closed when modal callback data does not match the API contract", async () => {
@@ -223,12 +205,12 @@ describe("public checkout", () => {
     });
 
     await expect(
-      client.checkout.create({
-        priceId: "price_1",
-        email: "buyer@example.com",
-        quantity: 1,
-        destinationKey: "default",
-      }),
+      client.checkout
+        .priceId("price_1")
+        .email("buyer@example.com")
+        .quantity(1)
+        .destinationKey("default")
+        .create(),
     ).rejects.toThrow(/Callback action/);
   });
 
@@ -250,12 +232,12 @@ describe("public checkout", () => {
     });
 
     await expect(
-      client.checkout.create({
-        priceId: "price_1",
-        email: "buyer@example.com",
-        quantity: 1,
-        destinationKey: "default",
-      }),
+      client.checkout
+        .priceId("price_1")
+        .email("buyer@example.com")
+        .quantity(1)
+        .destinationKey("default")
+        .create(),
     ).rejects.toBeInstanceOf(TypeError);
   });
 });

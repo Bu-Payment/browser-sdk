@@ -56,7 +56,7 @@ describe("createBuPaymentClient", () => {
       now: () => new Date("2026-09-03T12:00:00.000Z"),
     });
 
-    await Promise.all([client.catalogue.list().get(), client.catalogue.listPrices()]);
+    await Promise.all([client.catalogue.list().get(), client.catalogue.prices().get()]);
 
     expect(
       fetch.mock.calls.filter(([input]) => String(input).endsWith("application-sessions")),

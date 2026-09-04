@@ -25,6 +25,18 @@ const allowed = [
   "dist/index.d.ts",
   "dist/index.js",
   "dist/index.js.map",
+  "docs/catalogue.md",
+  "docs/checkout.md",
+  "docs/concepts-and-authentication.md",
+  "docs/errors.md",
+  "docs/examples.md",
+  "docs/idempotency.md",
+  "docs/index.md",
+  "docs/lifecycle-and-status.md",
+  "docs/payment-methods.md",
+  "docs/presentation-and-events.md",
+  "docs/resume-and-cancellation.md",
+  "docs/security.md",
   "package.json",
 ];
 if (JSON.stringify(publishedPaths) !== JSON.stringify(allowed)) {
@@ -47,7 +59,9 @@ writeFileSync(
 if (typeof createBuPaymentClient !== "function") throw new Error("Missing client export");
 if (!(new SessionInvalidError("invalid", { code: "application_session_invalid", status: 401 }) instanceof Error)) throw new Error("Invalid error export");
 const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test", fetch: async () => Response.json({}) });
-if (typeof client.checkout.present !== "function" || typeof client.checkout.resume !== "function") throw new Error("Missing checkout presentation exports");
+if (typeof client.checkout.presentation !== "function" || typeof client.checkout.resume !== "function" || typeof client.checkout.status !== "function") throw new Error("Missing checkout builder exports");
+if ("present" in client.checkout || "getStatus" in client.checkout || "redirect" in client.checkout) throw new Error("Imperative checkout API was exported");
+if ("getProduct" in client.catalogue || "listPrices" in client.catalogue) throw new Error("Imperative catalogue API was exported");
 if (typeof client.paymentMethods.present !== "function" || typeof client.paymentMethods.resume !== "function") throw new Error("Missing payment method presentation exports");
 `,
 );
@@ -58,7 +72,7 @@ execFileSync("bun", [join(consumerRoot, "consumer.mjs")], {
 
 writeFileSync(
   join(consumerRoot, "consumer.ts"),
-  `import { createBuPaymentClient, type CatalogueProductPage, type CheckoutStatus, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle, type Product, type ProductWithPrices } from "@bu-payment/browser-sdk";
+  `import { createBuPaymentClient, type CataloguePage, type CatalogueProductPage, type CheckoutLifecycle, type CheckoutStatus, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle, type Price, type Product, type ProductWithPrices } from "@bu-payment/browser-sdk";
 const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test" });
 const status: CheckoutStatus = "completed";
 const setup: PaymentMethodSetup = {
@@ -77,12 +91,21 @@ const handle: PresentationHandle<PaymentMethodSetup> = client.paymentMethods.pre
 const withPrices: Promise<CatalogueProductPage<ProductWithPrices>> = client.catalogue.list().limit(10).get();
 const withoutPrices: Promise<CatalogueProductPage<Product>> = client.catalogue.list().withoutPrices().get();
 const fluentCheckout = client.checkout.destinationKey("default").quantity(1).email("buyer@example.com").idempotencyKey("storefront-order-018f4f90a4c7").priceId("price_public_reference").create();
-void client.checkout.resume;
+const product = client.catalogue.product("product_public_reference").get();
+const prices: Promise<CataloguePage<Price>> = client.catalogue.prices().productId("product_public_reference").get();
+const checkoutLifecycle: Promise<CheckoutLifecycle> = client.checkout.status("checkout_public_reference").get();
+const checkoutHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.presentation({} as never).onEvent(() => {}).timeoutMs(1_000).start();
+const resumeHandle: PresentationHandle<CheckoutLifecycle> = client.checkout.resume().reference("checkout_public_reference").signal(new AbortController().signal).start();
 void event;
 void handle;
 void withPrices;
 void withoutPrices;
 void fluentCheckout;
+void product;
+void prices;
+void checkoutLifecycle;
+void checkoutHandle;
+void resumeHandle;
 void status;
 `,
 );

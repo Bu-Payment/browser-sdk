@@ -14,13 +14,13 @@ import type {
   ProductWithPrices,
 } from "./types";
 
-export interface ListOptions {
+interface ListOptions {
   cursor?: string;
   limit?: number;
   signal?: AbortSignal;
 }
 
-export interface PriceListOptions extends ListOptions {
+interface PriceListOptions extends ListOptions {
   productId?: string;
 }
 
@@ -32,76 +32,102 @@ export interface CatalogueListBuilder<TProduct extends Product = ProductWithPric
   get(): Promise<CatalogueProductPage<TProduct>>;
 }
 
+export interface CatalogueProductBuilder<TProduct extends Product = ProductWithPrices> {
+  signal(signal: AbortSignal): CatalogueProductBuilder<TProduct>;
+  withoutPrices(): CatalogueProductBuilder<Product>;
+  get(): Promise<TProduct>;
+}
+
+export interface CataloguePricesBuilder {
+  cursor(cursor: string): CataloguePricesBuilder;
+  limit(limit: number): CataloguePricesBuilder;
+  productId(productId: string): CataloguePricesBuilder;
+  signal(signal: AbortSignal): CataloguePricesBuilder;
+  get(): Promise<CataloguePage<Price>>;
+}
+
 export interface CatalogueClient {
-  list(options?: ListOptions): CatalogueListBuilder<ProductWithPrices>;
-  getProduct(productId: string, options?: { signal?: AbortSignal }): Promise<ProductWithPrices>;
-  listPrices(options?: PriceListOptions): Promise<CataloguePage<Price>>;
+  list(): CatalogueListBuilder<ProductWithPrices>;
+  product(productId: string): CatalogueProductBuilder<ProductWithPrices>;
+  prices(): CataloguePricesBuilder;
 }
 
 export function createCatalogueClient(http: HttpClient): CatalogueClient {
-  return {
-    list(options = {}) {
-      return new DefaultCatalogueListBuilder(http, { ...options }, parseProductWithPrices, true);
+  return Object.freeze({
+    list: () => createCatalogueListBuilder(http, {}, parseProductWithPrices, true),
+    product: (productId: string) =>
+      createCatalogueProductBuilder(http, productId, undefined, parseProductWithPrices, true),
+    prices: () => createCataloguePricesBuilder(http, {}),
+  });
+}
+
+function createCatalogueListBuilder<TProduct extends Product>(
+  http: HttpClient,
+  options: Readonly<ListOptions>,
+  parseItem: (value: unknown) => TProduct,
+  includePrices: boolean,
+): CatalogueListBuilder<TProduct> {
+  const next = (nextOptions: Readonly<ListOptions>) =>
+    createCatalogueListBuilder(http, nextOptions, parseItem, includePrices);
+  return Object.freeze({
+    cursor: (cursor: string) => next({ ...options, cursor }),
+    limit: (limit: number) => next({ ...options, limit }),
+    signal: (signal: AbortSignal) => next({ ...options, signal }),
+    withoutPrices: () => createCatalogueListBuilder(http, options, parseProduct, false),
+    get: async () => {
+      const query = buildListQuery(options, undefined, includePrices);
+      const value = await http.request(`public/v1/catalogue/products${query}`, {
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+      const page = parsePage(value, parseItem);
+      return { products: page.data, pagination: { nextCursor: page.nextCursor } };
     },
-    async getProduct(productId, options = {}) {
-      if (!productId) throw new TypeError("productId must not be empty");
+  });
+}
+
+function createCatalogueProductBuilder<TProduct extends Product>(
+  http: HttpClient,
+  productId: string,
+  signal: AbortSignal | undefined,
+  parseItem: (value: unknown) => TProduct,
+  includePrices: boolean,
+): CatalogueProductBuilder<TProduct> {
+  return Object.freeze({
+    signal: (nextSignal: AbortSignal) =>
+      createCatalogueProductBuilder(http, productId, nextSignal, parseItem, includePrices),
+    withoutPrices: () =>
+      createCatalogueProductBuilder(http, productId, signal, parseProduct, false),
+    get: async () => {
+      if (!productId.trim()) throw new TypeError("productId must not be empty");
+      const query = includePrices ? "" : "?include=none";
       const value = await http.request(
-        `public/v1/catalogue/products/${encodeURIComponent(productId)}`,
-        options.signal ? { signal: options.signal } : {},
+        `public/v1/catalogue/products/${encodeURIComponent(productId)}${query}`,
+        signal ? { signal } : {},
       );
-      return parseProductWithPrices(value);
+      return parseItem(value);
     },
-    async listPrices(options = {}) {
+  });
+}
+
+function createCataloguePricesBuilder(
+  http: HttpClient,
+  options: Readonly<PriceListOptions>,
+): CataloguePricesBuilder {
+  const next = (nextOptions: Readonly<PriceListOptions>) =>
+    createCataloguePricesBuilder(http, nextOptions);
+  return Object.freeze({
+    cursor: (cursor: string) => next({ ...options, cursor }),
+    limit: (limit: number) => next({ ...options, limit }),
+    productId: (productId: string) => next({ ...options, productId }),
+    signal: (signal: AbortSignal) => next({ ...options, signal }),
+    get: async () => {
       const query = buildListQuery(options, options.productId);
       const value = await http.request(`public/v1/catalogue/prices${query}`, {
         ...(options.signal ? { signal: options.signal } : {}),
       });
       return parsePage(value, parsePrice);
     },
-  };
-}
-
-class DefaultCatalogueListBuilder<TProduct extends Product>
-  implements CatalogueListBuilder<TProduct>
-{
-  constructor(
-    private readonly http: HttpClient,
-    private readonly options: Readonly<ListOptions>,
-    private readonly parseItem: (value: unknown) => TProduct,
-    private readonly includePrices: boolean,
-  ) {}
-
-  cursor(cursor: string): CatalogueListBuilder<TProduct> {
-    return this.withOptions({ ...this.options, cursor });
-  }
-
-  limit(limit: number): CatalogueListBuilder<TProduct> {
-    return this.withOptions({ ...this.options, limit });
-  }
-
-  signal(signal: AbortSignal): CatalogueListBuilder<TProduct> {
-    return this.withOptions({ ...this.options, signal });
-  }
-
-  withoutPrices(): CatalogueListBuilder<Product> {
-    return new DefaultCatalogueListBuilder(this.http, this.options, parseProduct, false);
-  }
-
-  async get(): Promise<CatalogueProductPage<TProduct>> {
-    const query = buildListQuery(this.options, undefined, this.includePrices);
-    const value = await this.http.request(`public/v1/catalogue/products${query}`, {
-      ...(this.options.signal ? { signal: this.options.signal } : {}),
-    });
-    const page = parsePage(value, this.parseItem);
-    return {
-      products: page.data,
-      pagination: { nextCursor: page.nextCursor },
-    };
-  }
-
-  private withOptions(options: Readonly<ListOptions>): CatalogueListBuilder<TProduct> {
-    return new DefaultCatalogueListBuilder(this.http, options, this.parseItem, this.includePrices);
-  }
+  });
 }
 
 function buildListQuery(options: ListOptions, productId?: string, includePrices?: boolean): string {

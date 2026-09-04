@@ -47,7 +47,7 @@ test("ignores an untrusted preexisting modal constructor", async ({ page }) => {
       },
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
-    const handle = client.checkout.present(input, { pollIntervalMs: 10_000 });
+    const handle = client.checkout.presentation(input).pollIntervalMs(10_000).start();
     for (let attempt = 0; !state.trustedConstructorUsed && attempt < 100; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

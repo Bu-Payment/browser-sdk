@@ -1,5 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
-import { type CheckoutCreated, createBuPaymentClient, type PresentationEvent } from "../../src";
+import {
+  type CheckoutCreated,
+  type CheckoutLifecycle,
+  createBuPaymentClient,
+  type PresentationEvent,
+  type PresentationHandle,
+} from "../../src";
 
 const session = {
   token: "session-token",
@@ -65,11 +71,12 @@ describe("presentation lifecycle", () => {
     const navigate = vi.fn();
     const events: PresentationEvent[] = [];
 
-    const handle = makeClient(fetch).checkout.present(checkout, {
-      navigate,
-      pollIntervalMs: 0,
-      onEvent: (event) => events.push(event),
-    });
+    const handle = makeClient(fetch)
+      .checkout.presentation(checkout)
+      .navigate(navigate)
+      .pollIntervalMs(0)
+      .onEvent((event) => events.push(event))
+      .start();
     expect(navigate).toHaveBeenCalledWith("https://pay.example.test/session");
     await expect(handle.completion).resolves.toMatchObject({ status: "completed" });
     expect(events).toEqual([
@@ -84,8 +91,16 @@ describe("presentation lifecycle", () => {
   test("deduplicates concurrent launches of one checkout", () => {
     const fetch = vi.fn().mockResolvedValue(json(session, 201));
     const sdk = makeClient(fetch);
-    const first = sdk.checkout.present(checkout, { navigate: vi.fn(), pollIntervalMs: 1_000 });
-    const second = sdk.checkout.present(checkout, { navigate: vi.fn(), pollIntervalMs: 1_000 });
+    const first = sdk.checkout
+      .presentation(checkout)
+      .navigate(vi.fn())
+      .pollIntervalMs(1_000)
+      .start();
+    const second = sdk.checkout
+      .presentation(checkout)
+      .navigate(vi.fn())
+      .pollIntervalMs(1_000)
+      .start();
 
     expect(second).toBe(first);
     first.cancel();
@@ -95,10 +110,12 @@ describe("presentation lifecycle", () => {
   test("cancel aborts local work without manufacturing a server status", async () => {
     const fetch = vi.fn().mockResolvedValue(json(session, 201));
     const events: PresentationEvent[] = [];
-    const handle = makeClient(fetch).checkout.resume("checkout_public", {
-      pollIntervalMs: 1_000,
-      onEvent: (event) => events.push(event),
-    });
+    const handle = makeClient(fetch)
+      .checkout.resume()
+      .reference("checkout_public")
+      .pollIntervalMs(1_000)
+      .onEvent((event) => events.push(event))
+      .start();
 
     handle.cancel();
 
@@ -113,11 +130,13 @@ describe("presentation lifecycle", () => {
       .mockResolvedValueOnce(json(session, 201))
       .mockImplementation(() => Promise.resolve(json(lifecycle("processing"))));
     const events: PresentationEvent[] = [];
-    const handle = makeClient(fetch).checkout.resume("checkout_public", {
-      timeoutMs: 10,
-      pollIntervalMs: 1_000,
-      onEvent: (event) => events.push(event),
-    });
+    const handle = makeClient(fetch)
+      .checkout.resume()
+      .reference("checkout_public")
+      .timeoutMs(10)
+      .pollIntervalMs(1_000)
+      .onEvent((event) => events.push(event))
+      .start();
 
     await expect(handle.completion).rejects.toMatchObject({ name: "TimeoutError" });
     expect(events.at(-1)).toEqual({ type: "timed_out", flow: "checkout_resume" });
@@ -132,7 +151,9 @@ describe("presentation lifecycle", () => {
     } as CheckoutCreated;
     const navigate = vi.fn();
 
-    expect(() => makeClient(vi.fn()).checkout.present(malicious, { navigate })).toThrow(TypeError);
+    expect(() =>
+      makeClient(vi.fn()).checkout.presentation(malicious).navigate(navigate).start(),
+    ).toThrow(TypeError);
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -144,7 +165,9 @@ describe("presentation lifecycle", () => {
       checkoutUrl: "https://pay.example.test/session#javascript",
     } as CheckoutCreated;
 
-    expect(() => makeClient(vi.fn()).checkout.present(tampered, { navigate })).toThrow(TypeError);
+    expect(() =>
+      makeClient(vi.fn()).checkout.presentation(tampered).navigate(navigate).start(),
+    ).toThrow(TypeError);
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -161,10 +184,11 @@ describe("presentation lifecycle", () => {
       storage,
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
-    const first = firstClient.checkout.present(checkout, {
-      navigate: vi.fn(),
-      pollIntervalMs: 1_000,
-    });
+    const first = firstClient.checkout
+      .presentation(checkout)
+      .navigate(vi.fn())
+      .pollIntervalMs(1_000)
+      .start();
     const persisted = storage.value();
 
     const wrongApplication = createBuPaymentClient({
@@ -173,7 +197,7 @@ describe("presentation lifecycle", () => {
       fetch: vi.fn(),
       storage,
     });
-    expect(() => wrongApplication.checkout.resume()).toThrow(/No resumable/);
+    expect(() => wrongApplication.checkout.resume().start()).toThrow(/No resumable/);
 
     const secondFetch = vi
       .fn()
@@ -186,7 +210,7 @@ describe("presentation lifecycle", () => {
       storage,
       now: () => new Date("2030-01-01T00:00:01.000Z"),
     });
-    const resumed = secondClient.checkout.resume(undefined, { pollIntervalMs: 0 });
+    const resumed = secondClient.checkout.resume().pollIntervalMs(0).start();
 
     await expect(resumed.completion).resolves.toMatchObject({ status: "completed" });
     expect(persisted).toContain("checkout_public");
@@ -204,9 +228,13 @@ describe("presentation lifecycle", () => {
       storage: new ThrowingStorage(),
     });
 
-    let handle: ReturnType<typeof client.checkout.present> | undefined;
+    let handle: PresentationHandle<CheckoutLifecycle> | undefined;
     expect(() => {
-      handle = client.checkout.present(checkout, { navigate: vi.fn(), pollIntervalMs: 1_000 });
+      handle = client.checkout
+        .presentation(checkout)
+        .navigate(vi.fn())
+        .pollIntervalMs(1_000)
+        .start();
     }).not.toThrow();
     handle?.cancel();
     return expect(handle?.completion).rejects.toMatchObject({ name: "AbortError" });

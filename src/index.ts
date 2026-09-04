@@ -1,8 +1,8 @@
 export type {
   CatalogueClient,
   CatalogueListBuilder,
-  ListOptions,
-  PriceListOptions,
+  CataloguePricesBuilder,
+  CatalogueProductBuilder,
 } from "./catalogue/client";
 export type {
   CataloguePage,
@@ -15,8 +15,10 @@ export type {
 export type {
   CheckoutBuilder,
   CheckoutClient,
+  CheckoutPresentationBuilder,
   CheckoutReadyBuilder,
-  CheckoutRequestOptions,
+  CheckoutResumeBuilder,
+  CheckoutStatusBuilder,
 } from "./checkout/client";
 export type {
   CheckoutActions,
@@ -24,7 +26,6 @@ export type {
   CheckoutLifecycle,
   CheckoutStatus,
   CheckoutType,
-  CreateCheckoutInput,
   ModalPresentation,
   ModalVerificationField,
   RedirectPresentation,

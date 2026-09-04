@@ -49,10 +49,11 @@ test("callback failure cannot override canonical completion", async ({ page }) =
       },
       now: () => new Date("2030-01-01T00:00:00.000Z"),
     });
-    const handle = client.checkout.present(checkout, {
-      pollIntervalMs: 0,
-      onEvent: (event: { type: string }) => events.push(event),
-    });
+    const handle = client.checkout
+      .presentation(checkout)
+      .pollIntervalMs(0)
+      .onEvent((event: { type: string }) => events.push(event))
+      .start();
     for (let attempt = 0; !window.modal && attempt < 100; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
