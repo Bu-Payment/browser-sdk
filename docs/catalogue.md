@@ -23,8 +23,10 @@ withoutPrices(): CatalogueListBuilder<Product>
 get(): Promise<CatalogueProductPage<ProductWithPrices>>
 ```
 
-Prices are embedded by default in the same request. A product with no eligible price has
-`prices: []`. Use `withoutPrices()` when only product metadata is needed:
+Prices are included by default. The SDK composes the canonical product and price endpoints,
+fetching price pages in batches rather than issuing one request per product. A product with no
+eligible price has `prices: []`. Use `withoutPrices()` when only product metadata is needed; this
+form requests only the product endpoint:
 
 ```ts
 const { products } = await buPayment.catalogue
@@ -56,8 +58,9 @@ const product = await buPayment.catalogue
   .get();
 ```
 
-`product(id).get()` returns `Promise<ProductWithPrices>`. Prices are included by default. The
-metadata-only form returns `Promise<Product>`:
+`product(id).get()` returns `Promise<ProductWithPrices>`. Prices are included by composing the
+canonical product endpoint with the filtered price endpoint. The metadata-only form returns
+`Promise<Product>` and requests only the product endpoint:
 
 ```ts
 const product = await buPayment.catalogue
