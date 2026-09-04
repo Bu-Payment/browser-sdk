@@ -14,6 +14,9 @@ const created = {
   status: "pending",
   presentationVersion: 1,
   presentation: { kind: "redirect", url: "https://provider.example/checkout/session" },
+  actions: {
+    status: { method: "GET", url: "/public/v1/checkouts/bup_co_test_reference" },
+  },
   checkoutUrl: "https://provider.example/checkout/session",
   createdAt: "2026-09-03T12:00:00.000Z",
   expiresAt: "2026-09-03T12:30:00.000Z",
@@ -81,6 +84,9 @@ describe("public checkout", () => {
       reference: "opaque/reference",
       type: "subscription",
       status: "completed",
+      actions: {
+        status: { method: "GET", url: "/public/v1/checkouts/opaque/reference" },
+      },
       createdAt: "2026-09-03T12:00:00.000Z",
       updatedAt: "2026-09-03T12:05:00.000Z",
       expiresAt: "2026-09-03T12:30:00.000Z",
@@ -138,16 +144,43 @@ describe("public checkout", () => {
       presentationVersion: 1,
       presentation: {
         kind: "modal",
-        script: { url: "https://payment.tmtprotects.com/tmt-payment-modal.3.6.1.js" },
-        configuration: {
-          sessionToken: "opaque",
-          amount: 1200,
-          currency: "EUR",
-          reference: "bup_co_test_modal",
+        adapter: "trust-my-travel-payment-modal",
+        resource: {
+          url: "https://payment.tmtprotects.com/tmt-payment-modal.3.6.1.js",
+          version: "3.6.1",
         },
+        configuration: {
+          path: "merchant-path",
+          environment: "test",
+          booking: {
+            id: 44,
+            channelId: 2452,
+            currency: "EUR",
+            amount: 1200,
+            allocations: [],
+            reference: "authenticated-reference",
+          },
+          payer: {
+            name: "Example Buyer",
+            email: "buyer@example.com",
+            address: "1 Example Street",
+            city: "Lisbon",
+            postalCode: "1000-001",
+            country: "PT",
+          },
+        },
+        authorization: {
+          value: `${"a".repeat(64)}20260903120000`,
+          verificationFields: ["allocations", "reference"],
+          expiresAt: "2026-09-03T12:15:00.000Z",
+        },
+      },
+      actions: {
+        status: { method: "GET", url: "/public/v1/checkouts/bup_co_test_modal" },
         callback: {
+          method: "POST",
           url: "/public/v1/checkouts/bup_co_test_modal/callback",
-          token: "opaque-callback",
+          token: "bup_co_test_modal",
         },
       },
       createdAt: "2026-09-03T12:00:00.000Z",
@@ -166,7 +199,7 @@ describe("public checkout", () => {
       destinationKey: "default",
     });
 
-    expect(checkout.presentation.kind).toBe("modal");
+    expect(checkout.presentation?.kind).toBe("modal");
     expect(() => client.checkout.redirect(checkout)).toThrow(/not a redirect/);
   });
 
@@ -174,16 +207,13 @@ describe("public checkout", () => {
     const invalidModal = {
       ...created,
       checkoutUrl: undefined,
-      presentation: {
-        kind: "modal",
-        script: { url: "https://payment.tmtprotects.com/tmt-payment-modal.3.6.1.js" },
-        configuration: {
-          sessionToken: "opaque",
-          amount: 1200,
-          currency: "EUR",
-          reference: "bup_co_test_modal",
+      actions: {
+        status: { method: "GET", url: "/public/v1/checkouts/bup_co_test_reference" },
+        callback: {
+          method: "POST",
+          url: "/public/v1/checkouts/other/callback",
+          token: "bup_co_test_reference",
         },
-        callback: { url: "https://attacker.example/callback", token: "opaque" },
       },
     };
     const client = createBuPaymentClient({
@@ -199,6 +229,33 @@ describe("public checkout", () => {
         quantity: 1,
         destinationKey: "default",
       }),
-    ).rejects.toThrow(/callback URL/);
+    ).rejects.toThrow(/Callback action/);
+  });
+
+  it.each([
+    ["a non-RFC3339 date", { ...created, createdAt: "2026-09-03" }],
+    [
+      "an oversized presentation URL",
+      {
+        ...created,
+        presentation: { kind: "redirect", url: `https://provider.example/${"x".repeat(4090)}` },
+        checkoutUrl: `https://provider.example/${"x".repeat(4090)}`,
+      },
+    ],
+  ])("rejects %s", async (_case, response) => {
+    const client = createBuPaymentClient({
+      publishableKey: "bup_pk_test_sample",
+      apiBaseUrl: "https://api.example.test",
+      fetch: createFetch(response),
+    });
+
+    await expect(
+      client.checkout.create({
+        priceId: "price_1",
+        email: "buyer@example.com",
+        quantity: 1,
+        destinationKey: "default",
+      }),
+    ).rejects.toBeInstanceOf(TypeError);
   });
 });

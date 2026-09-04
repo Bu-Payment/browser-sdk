@@ -1,5 +1,7 @@
-import { asObject, asString, assertExactKeys, type JsonObject } from "../core/validation";
+import { asObject, asString, assertExactKeys } from "../core/validation";
+import { parseModalPresentation } from "./modal-validation";
 import type {
+  CheckoutActions,
   CheckoutCreated,
   CheckoutLifecycle,
   CheckoutStatus,
@@ -43,34 +45,38 @@ export function parseCreateCheckoutInput(value: unknown): CreateCheckoutInput {
 
 export function parseCheckoutCreated(value: unknown): CheckoutCreated {
   const object = asObject(value, "Checkout");
-  const keys = [
-    "reference",
-    "type",
-    "status",
-    "presentationVersion",
-    "presentation",
-    "createdAt",
-    "expiresAt",
-  ];
+  const keys = ["reference", "type", "status", "actions", "createdAt", "expiresAt"];
+  if ("presentationVersion" in object) keys.push("presentationVersion");
+  if ("presentation" in object) keys.push("presentation");
   if ("checkoutUrl" in object) keys.push("checkoutUrl");
   assertExactKeys(object, keys, "Checkout");
-  const presentation = parsePresentation(object.presentation);
-  if (object.status !== "pending" || object.presentationVersion !== 1) {
-    throw new TypeError("Checkout status or presentation version is invalid");
+  const reference = asString(object.reference, "reference");
+  const status = parseCheckoutStatus(object.status);
+  const actions = parseActions(object.actions, reference);
+  const active = status === "pending" || status === "processing";
+  if (
+    active !== (object.presentation !== undefined) ||
+    active !== (object.presentationVersion === 1)
+  ) {
+    throw new TypeError("Checkout presentation availability is invalid");
   }
+  const presentation = active ? parsePresentation(object.presentation) : undefined;
   const checkoutUrl = object.checkoutUrl;
-  if (presentation.kind === "redirect" && checkoutUrl !== presentation.url) {
+  if (presentation?.kind === "redirect" && checkoutUrl !== presentation.url) {
     throw new TypeError("checkoutUrl must match redirect presentation URL");
   }
-  if (presentation.kind === "modal" && checkoutUrl !== undefined) {
+  if (presentation?.kind !== "redirect" && checkoutUrl !== undefined) {
     throw new TypeError("checkoutUrl is redirect-only");
   }
+  if ((presentation?.kind === "modal") !== (actions.callback !== undefined)) {
+    throw new TypeError("Checkout callback availability is invalid");
+  }
   return {
-    reference: asString(object.reference, "reference"),
+    reference,
     type: parseCheckoutType(object.type),
-    status: "pending",
-    presentationVersion: 1,
-    presentation,
+    status,
+    actions,
+    ...(presentation ? { presentationVersion: 1 as const, presentation } : {}),
     ...(checkoutUrl === undefined ? {} : { checkoutUrl: asString(checkoutUrl, "checkoutUrl") }),
     createdAt: parseDate(object.createdAt, "createdAt"),
     expiresAt: parseDate(object.expiresAt, "expiresAt"),
@@ -79,17 +85,30 @@ export function parseCheckoutCreated(value: unknown): CheckoutCreated {
 
 export function parseCheckoutLifecycle(value: unknown): CheckoutLifecycle {
   const object = asObject(value, "Checkout lifecycle");
-  assertExactKeys(
-    object,
-    ["reference", "type", "status", "createdAt", "updatedAt", "expiresAt"],
-    "Checkout lifecycle",
-  );
-  const status = asString(object.status, "status") as CheckoutStatus;
-  if (!checkoutStatuses.has(status)) throw new TypeError("Checkout status is invalid");
+  const keys = ["reference", "type", "status", "actions", "createdAt", "updatedAt", "expiresAt"];
+  if ("presentationVersion" in object) keys.push("presentationVersion");
+  if ("presentation" in object) keys.push("presentation");
+  assertExactKeys(object, keys, "Checkout lifecycle");
+  const reference = asString(object.reference, "reference");
+  const status = parseCheckoutStatus(object.status);
+  const actions = parseActions(object.actions, reference);
+  const active = status === "pending" || status === "processing";
+  if (
+    active !== (object.presentation !== undefined) ||
+    active !== (object.presentationVersion === 1)
+  ) {
+    throw new TypeError("Checkout lifecycle presentation availability is invalid");
+  }
+  const presentation = active ? parsePresentation(object.presentation) : undefined;
+  if ((presentation?.kind === "modal") !== (actions.callback !== undefined)) {
+    throw new TypeError("Checkout lifecycle callback availability is invalid");
+  }
   return {
-    reference: asString(object.reference, "reference"),
+    reference,
     type: parseCheckoutType(object.type),
     status,
+    actions,
+    ...(presentation ? { presentationVersion: 1 as const, presentation } : {}),
     createdAt: parseDate(object.createdAt, "createdAt"),
     updatedAt: parseDate(object.updatedAt, "updatedAt"),
     expiresAt: parseDate(object.expiresAt, "expiresAt"),
@@ -100,58 +119,37 @@ function parsePresentation(value: unknown): RedirectPresentation | ModalPresenta
   const object = asObject(value, "Checkout presentation");
   if (object.kind === "redirect") {
     assertExactKeys(object, ["kind", "url"], "Redirect presentation");
-    return { kind: "redirect", url: asString(object.url, "url") };
+    const url = asString(object.url, "url");
+    if (url.length > 4_096) throw new TypeError("Checkout presentation URL is too long");
+    return { kind: "redirect", url };
   }
   if (object.kind !== "modal") throw new TypeError("Checkout presentation kind is invalid");
-  assertExactKeys(object, ["kind", "script", "configuration", "callback"], "Modal presentation");
-  return parseModal(object);
+  return parseModalPresentation(object);
 }
 
-function parseModal(object: JsonObject): ModalPresentation {
-  const script = asObject(object.script, "Modal script");
-  assertExactKeys(script, ["url"], "Modal script");
-  if (script.url !== "https://payment.tmtprotects.com/tmt-payment-modal.3.6.1.js") {
-    throw new TypeError("Modal script is not allowlisted");
-  }
-  const configuration = asObject(object.configuration, "Modal configuration");
-  assertExactKeys(
-    configuration,
-    ["sessionToken", "amount", "currency", "reference"],
-    "Modal configuration",
-  );
-  if (!Number.isSafeInteger(configuration.amount) || Number(configuration.amount) < 1) {
-    throw new TypeError("Modal amount is invalid");
-  }
-  const sessionToken = asString(configuration.sessionToken, "sessionToken");
-  const reference = asString(configuration.reference, "reference");
-  if (!sessionToken || sessionToken.length > 4096 || !reference || reference.length > 255) {
-    throw new TypeError("Modal configuration is invalid");
-  }
-  const currency = asString(configuration.currency, "currency");
-  if (!/^[A-Z]{3}$/.test(currency)) throw new TypeError("Modal currency is invalid");
-  const callback = asObject(object.callback, "Modal callback");
-  assertExactKeys(callback, ["url", "token"], "Modal callback");
-  const callbackUrl = asString(callback.url, "callback.url");
-  const callbackToken = asString(callback.token, "token");
-  if (!/^\/public\/v1\/checkouts\/[A-Za-z0-9_-]+\/callback$/.test(callbackUrl)) {
-    throw new TypeError("Modal callback URL is invalid");
-  }
-  if (!callbackToken || callbackToken.length > 4096) {
-    throw new TypeError("Modal callback token is invalid");
+function parseActions(value: unknown, reference: string): CheckoutActions {
+  const object = asObject(value, "Checkout actions");
+  const keys = ["status"];
+  if ("callback" in object) keys.push("callback");
+  assertExactKeys(object, keys, "Checkout actions");
+  const status = asObject(object.status, "Checkout status action");
+  assertExactKeys(status, ["method", "url"], "Checkout status action");
+  const base = `/public/v1/checkouts/${reference}`;
+  if (status.method !== "GET" || status.url !== base)
+    throw new TypeError("Status action is unbound");
+  if (object.callback === undefined) return { status: { method: "GET", url: base } };
+  const callback = asObject(object.callback, "Checkout callback action");
+  assertExactKeys(callback, ["method", "url", "token"], "Checkout callback action");
+  if (
+    callback.method !== "POST" ||
+    callback.url !== `${base}/callback` ||
+    callback.token !== reference
+  ) {
+    throw new TypeError("Callback action is unbound");
   }
   return {
-    kind: "modal",
-    script: { url: script.url },
-    configuration: {
-      sessionToken,
-      amount: Number(configuration.amount),
-      currency,
-      reference,
-    },
-    callback: {
-      url: callbackUrl,
-      token: callbackToken,
-    },
+    status: { method: "GET", url: base },
+    callback: { method: "POST", url: `${base}/callback`, token: reference },
   };
 }
 
@@ -161,8 +159,19 @@ function parseCheckoutType(value: unknown): CheckoutType {
   return value;
 }
 
+function parseCheckoutStatus(value: unknown): CheckoutStatus {
+  const status = asString(value, "status") as CheckoutStatus;
+  if (!checkoutStatuses.has(status)) throw new TypeError("Checkout status is invalid");
+  return status;
+}
+
 function parseDate(value: unknown, field: string): string {
   const date = asString(value, field);
-  if (Number.isNaN(Date.parse(date))) throw new TypeError(`${field} must be an ISO date-time`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(date) ||
+    Number.isNaN(Date.parse(date))
+  ) {
+    throw new TypeError(`${field} must be an RFC3339 UTC date-time`);
+  }
   return date;
 }

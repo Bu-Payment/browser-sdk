@@ -2,12 +2,14 @@ export type { CatalogueClient, ListOptions, PriceListOptions } from "./catalogue
 export type { CataloguePage, Price, Product } from "./catalogue/types";
 export type { CheckoutClient, CheckoutRequestOptions } from "./checkout/client";
 export type {
+  CheckoutActions,
   CheckoutCreated,
   CheckoutLifecycle,
   CheckoutStatus,
   CheckoutType,
   CreateCheckoutInput,
   ModalPresentation,
+  ModalVerificationField,
   RedirectPresentation,
 } from "./checkout/types";
 export type { BuPaymentClient, BuPaymentClientOptions } from "./client";
@@ -30,4 +32,21 @@ export {
   SessionUnavailableError,
   ValidationError,
 } from "./errors";
+export type {
+  PaymentMethodPresentationOptions,
+  PaymentMethodRequestOptions,
+  PaymentMethodsClient,
+} from "./payment-methods/client";
+export type {
+  PaymentMethodSetup,
+  PaymentMethodSetupStatus,
+  PaymentMethodStatus,
+  StoredPaymentMethod,
+} from "./payment-methods/types";
+export type {
+  PresentationEvent,
+  PresentationFlow,
+  PresentationHandle,
+  PresentationOptions,
+} from "./presentation/types";
 export type { BrowserApplicationSession, BrowserCapability } from "./session/types";

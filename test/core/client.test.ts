@@ -63,5 +63,6 @@ describe("createBuPaymentClient", () => {
     ).toHaveLength(1);
     const bootstrapHeaders = new Headers(fetch.mock.calls[0]?.[1]?.headers);
     expect(bootstrapHeaders.has("Origin")).toBe(false);
+    expect(fetch.mock.calls.every(([, init]) => init?.credentials === "omit")).toBe(true);
   });
 });
