@@ -58,7 +58,7 @@ execFileSync("bun", [join(consumerRoot, "consumer.mjs")], {
 
 writeFileSync(
   join(consumerRoot, "consumer.ts"),
-  `import { createBuPaymentClient, type CheckoutStatus, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle } from "@bu-payment/browser-sdk";
+  `import { createBuPaymentClient, type CatalogueProductPage, type CheckoutStatus, type PaymentMethodSetup, type PresentationEvent, type PresentationHandle, type Product, type ProductWithPrices } from "@bu-payment/browser-sdk";
 const client = createBuPaymentClient({ publishableKey: "bup_pk_test_sample", apiBaseUrl: "https://api.example.test" });
 const status: CheckoutStatus = "completed";
 const setup: PaymentMethodSetup = {
@@ -74,10 +74,15 @@ const setup: PaymentMethodSetup = {
 };
 const event: PresentationEvent = { type: "polling", flow: "payment_method_resume", status: "processing" };
 const handle: PresentationHandle<PaymentMethodSetup> = client.paymentMethods.present(setup, { navigate() {} });
-void client.catalogue.listProducts({ limit: 10 });
+const withPrices: Promise<CatalogueProductPage<ProductWithPrices>> = client.catalogue.list().limit(10).get();
+const withoutPrices: Promise<CatalogueProductPage<Product>> = client.catalogue.list().withoutPrices().get();
+const fluentCheckout = client.checkout.destinationKey("default").quantity(1).email("buyer@example.com").idempotencyKey("storefront-order-018f4f90a4c7").priceId("price_public_reference").create();
 void client.checkout.resume;
 void event;
 void handle;
+void withPrices;
+void withoutPrices;
+void fluentCheckout;
 void status;
 `,
 );

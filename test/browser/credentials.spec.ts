@@ -12,8 +12,8 @@ test("never forwards same-origin shopper cookies to BuPayment", async ({ context
       publishableKey: "bup_pk_test_example",
       apiBaseUrl: location.origin,
     });
-    return client.catalogue.listProducts();
+    return client.catalogue.list().get();
   });
 
-  expect(result).toEqual({ data: [], nextCursor: null });
+  expect(result).toEqual({ products: [], pagination: { nextCursor: null } });
 });
