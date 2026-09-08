@@ -24,6 +24,7 @@ test("concurrent modal launches load the trusted script once", async ({ page }) 
       reference,
       type: "payment",
       status: "pending",
+      provider: "trust-my-travel",
       presentationVersion: 1,
       presentation: {
         kind: "modal",

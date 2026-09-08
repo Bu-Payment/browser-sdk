@@ -12,6 +12,7 @@ export const ErrorCode = Object.freeze({
   CHECKOUT_DESTINATION_UNAVAILABLE: "checkout_destination_unavailable",
   CHECKOUT_LIVE_NOT_ENABLED: "checkout_live_not_enabled",
   CHECKOUT_PROVIDER_FAILED: "checkout_provider_failed",
+  CHECKOUT_PROVIDER_UNKNOWN: "checkout_provider_unknown",
   CHECKOUT_UNAVAILABLE: "checkout_unavailable",
   CATALOGUE_UNAVAILABLE: "catalogue_unavailable",
   CUSTOMER_SESSION_MALFORMED: "customer_session_malformed",

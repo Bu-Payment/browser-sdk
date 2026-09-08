@@ -71,7 +71,8 @@ test("resumes an active modal and Escape cancels without claiming completion", a
       updatedAt: "2030-01-01T00:01:00.000Z",
       expiresAt: "2030-01-01T00:30:00.000Z",
     };
-    const { updatedAt: _updatedAt, ...createdCheckout } = activeCheckout;
+    const { updatedAt: _updatedAt, ...canonical } = activeCheckout;
+    const createdCheckout = { ...canonical, provider: "trust-my-travel" };
     const firstResponses = [applicationSession, createdCheckout];
     const firstClient = createBuPaymentClient({
       publishableKey: "bup_pk_test_example",

@@ -7,6 +7,7 @@ export function publicCheckout(value: CheckoutCreated): Checkout {
     reference: value.reference,
     type: value.type,
     status: value.status,
+    ...(value.provider === undefined ? {} : { provider: value.provider }),
     createdAt: value.createdAt,
     expiresAt: value.expiresAt,
   });

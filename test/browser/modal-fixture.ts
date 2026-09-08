@@ -5,6 +5,7 @@ export const modalCheckoutFixture = {
   reference: "checkout_loader",
   type: "payment",
   status: "pending",
+  provider: "trust-my-travel",
   presentationVersion: 1,
   presentation: {
     kind: "modal",

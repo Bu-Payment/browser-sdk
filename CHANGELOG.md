@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Checkout creation accepts an optional `provider()` selection, propagated as the `provider` request
+  field, and exposes the resolved `provider` on the created checkout. Canonical status stays
+  provider-neutral. Provider selection participates in the idempotency intent, so the same fields
+  with a different provider create a distinct checkout.
+- `ErrorCode.CHECKOUT_PROVIDER_UNKNOWN` for a provider without a configured account in the
+  environment.
+
 ### Changed
 
 - Catalogue product reads now compose the canonical product and price endpoints without N+1
