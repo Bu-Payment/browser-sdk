@@ -22,7 +22,9 @@ const checkoutStatuses = new Set<CheckoutStatus>([
 
 export function parseCreateCheckoutInput(value: unknown): CreateCheckoutInput {
   const object = asObject(value, "Checkout input");
-  assertExactKeys(object, ["priceId", "email", "quantity", "destinationKey"], "Checkout input");
+  const inputKeys = ["priceId", "email", "quantity", "destinationKey"];
+  if ("provider" in object) inputKeys.push("provider");
+  assertExactKeys(object, inputKeys, "Checkout input");
   const priceId = asString(object.priceId, "priceId").trim();
   const email = asString(object.email, "email").trim();
   const destinationKey = asString(object.destinationKey, "destinationKey");
@@ -40,12 +42,29 @@ export function parseCreateCheckoutInput(value: unknown): CreateCheckoutInput {
   if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(destinationKey)) {
     throw new TypeError("destinationKey is invalid");
   }
-  return { priceId, email, quantity: Number(object.quantity), destinationKey };
+  const provider =
+    "provider" in object ? normalizeProvider(asString(object.provider, "provider")) : undefined;
+  return {
+    priceId,
+    email,
+    quantity: Number(object.quantity),
+    destinationKey,
+    ...(provider === undefined ? {} : { provider }),
+  };
 }
+
+function normalizeProvider(value: string): string {
+  const provider = value.trim().toLowerCase();
+  if (!providerPattern.test(provider)) throw new TypeError("provider is invalid");
+  return provider;
+}
+
+const providerPattern = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export function parseCheckoutCreated(value: unknown): CheckoutCreated {
   const object = asObject(value, "Checkout");
   const keys = ["reference", "type", "status", "actions", "createdAt", "expiresAt"];
+  if ("provider" in object) keys.push("provider");
   if ("presentationVersion" in object) keys.push("presentationVersion");
   if ("presentation" in object) keys.push("presentation");
   if ("checkoutUrl" in object) keys.push("checkoutUrl");
@@ -61,6 +80,10 @@ export function parseCheckoutCreated(value: unknown): CheckoutCreated {
     throw new TypeError("Checkout presentation availability is invalid");
   }
   const presentation = active ? parsePresentation(object.presentation) : undefined;
+  const provider = object.provider === undefined ? undefined : parseProvider(object.provider);
+  if (presentation && provider === undefined) {
+    throw new TypeError("Checkout provider is missing for a presented checkout");
+  }
   const checkoutUrl = object.checkoutUrl;
   if (presentation?.kind === "redirect" && checkoutUrl !== presentation.url) {
     throw new TypeError("checkoutUrl must match redirect presentation URL");
@@ -75,6 +98,7 @@ export function parseCheckoutCreated(value: unknown): CheckoutCreated {
     reference,
     type: parseCheckoutType(object.type),
     status,
+    ...(provider === undefined ? {} : { provider }),
     actions,
     ...(presentation ? { presentationVersion: 1 as const, presentation } : {}),
     ...(checkoutUrl === undefined ? {} : { checkoutUrl: asString(checkoutUrl, "checkoutUrl") }),
@@ -151,6 +175,12 @@ function parseActions(value: unknown, reference: string): CheckoutActions {
     status: { method: "GET", url: base },
     callback: { method: "POST", url: `${base}/callback`, token: reference },
   };
+}
+
+function parseProvider(value: unknown): string {
+  const provider = asString(value, "provider");
+  if (!providerPattern.test(provider)) throw new TypeError("Checkout provider is invalid");
+  return provider;
 }
 
 function parseCheckoutType(value: unknown): CheckoutType {

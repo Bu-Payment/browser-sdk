@@ -11,6 +11,7 @@ const modal = {
   reference: "checkout_public",
   type: "payment",
   status: "pending",
+  provider: "trust-my-travel",
   presentationVersion: 1,
   presentation: {
     kind: "modal",

@@ -12,6 +12,7 @@ export interface CreateCheckoutInput {
   email: string;
   quantity: number;
   destinationKey: string;
+  provider?: string;
 }
 
 export interface RedirectPresentation {
@@ -75,6 +76,7 @@ export interface CheckoutCreated {
   reference: string;
   type: CheckoutType;
   status: CheckoutStatus;
+  provider?: string;
   presentationVersion?: 1;
   presentation?: RedirectPresentation | ModalPresentation;
   actions: CheckoutActions;
@@ -99,10 +101,16 @@ export interface Checkout {
   reference: string;
   type: CheckoutType;
   status: CheckoutStatus;
+  provider?: string;
   createdAt: string;
   expiresAt: string;
 }
 
-export interface CheckoutResult extends Checkout {
+export interface CheckoutResult {
+  reference: string;
+  type: CheckoutType;
+  status: CheckoutStatus;
+  createdAt: string;
   updatedAt: string;
+  expiresAt: string;
 }

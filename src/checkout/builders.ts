@@ -11,6 +11,7 @@ interface CheckoutBuilderMethods<TState extends CheckoutBuilderState> {
   destinationKey(
     destinationKey: string,
   ): CheckoutBuilder<TState & Pick<CreateCheckoutInput, "destinationKey">>;
+  provider(provider: string): CheckoutBuilder<TState>;
   cspNonce(cspNonce: string): CheckoutBuilder<TState>;
   navigate(navigate: (url: string) => void): CheckoutBuilder<TState>;
   onEvent(onEvent: NonNullable<OperationOptions["onEvent"]>): CheckoutBuilder<TState>;
@@ -69,6 +70,7 @@ function createCheckoutBuilder<TState extends CheckoutBuilderState>(
     email: (email: string) => next({ email }),
     quantity: (quantity: number) => next({ quantity }),
     destinationKey: (destinationKey: string) => next({ destinationKey }),
+    provider: (provider: string) => next({ provider }),
     cspNonce: (cspNonce: string) => next({ cspNonce }),
     navigate: (navigate: (url: string) => void) => next({ navigate }),
     onEvent: (onEvent: NonNullable<OperationOptions["onEvent"]>) => next({ onEvent }),
@@ -121,6 +123,7 @@ function checkoutInput(state: CheckoutBuilderState & CreateCheckoutInput): Creat
     email: state.email,
     quantity: state.quantity,
     destinationKey: state.destinationKey,
+    ...(state.provider === undefined ? {} : { provider: state.provider }),
   };
 }
 

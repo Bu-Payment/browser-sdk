@@ -120,6 +120,7 @@ function canonicalIntent(input: CreateCheckoutInput): string {
     input.email.trim().toLowerCase(),
     input.quantity,
     input.destinationKey.trim(),
+    input.provider?.trim().toLowerCase() ?? null,
   ]);
 }
 

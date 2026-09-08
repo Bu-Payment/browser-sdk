@@ -15,6 +15,7 @@ const created = {
   reference: "checkout_public",
   type: "payment",
   status: "pending",
+  provider: "trust-my-travel",
   presentationVersion: 1,
   presentation: { kind: "redirect", url: "https://pay.example.test/session" },
   actions: { status: { method: "GET", url: "/public/v1/checkouts/checkout_public" } },

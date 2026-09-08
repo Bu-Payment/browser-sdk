@@ -12,6 +12,7 @@ const created = {
   reference: "bup_co_test_reference",
   type: "payment",
   status: "pending",
+  provider: "trust-my-travel",
   presentationVersion: 1,
   presentation: { kind: "redirect", url: "https://provider.example/checkout/session" },
   actions: {
@@ -129,6 +130,7 @@ describe("public checkout", () => {
       reference: "bup_co_test_modal",
       type: "subscription",
       status: "pending",
+      provider: "trust-my-travel",
       presentationVersion: 1,
       presentation: {
         kind: "modal",
