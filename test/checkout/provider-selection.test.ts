@@ -97,6 +97,21 @@ describe("checkout provider selection", () => {
     ).toBe(true);
   });
 
+  it.each([
+    ["s"],
+    ["9"],
+    [`s${"a".repeat(63)}`],
+    ["trust-my-travel"],
+  ])("accepts the provider name %j at the edges of the documented format", async (provider) => {
+    const fetch = createFetch({ ...created, provider });
+
+    const checkout = await ready(createClient(fetch)).provider(provider).create();
+
+    const [, init] = fetch.mock.calls.at(-1) ?? [];
+    expect(JSON.parse(String(init?.body)).provider).toBe(provider);
+    expect(checkout.provider).toBe(provider);
+  });
+
   it("exposes the provider the API resolved on the created checkout", async () => {
     const checkout = await ready(createClient(createFetch())).create();
 
@@ -164,22 +179,34 @@ describe("checkout provider selection", () => {
     });
   });
 
-  it("derives a distinct idempotency key per selected provider", async () => {
+  it.each([
+    ["a distinct intent per selected provider", [undefined, "sisp", "trust-my-travel"], 3],
+    ["one intent for provider names that normalize alike", ["sisp", "  SISP  "], 1],
+  ])("derives %s", async (_case, providers, expected) => {
     const keys: string[] = [];
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const fetch = vi.fn<typeof globalThis.fetch>(async (input, init) => {
       if (new URL(String(input)).pathname.includes("/application-sessions")) {
         return Response.json(session);
       }
       keys.push(new Headers(init?.headers).get("Idempotency-Key") ?? "");
+      await gate;
       return Response.json(created, { status: 201 });
     });
     const client = createClient(fetch as ReturnType<typeof createFetch>);
 
-    await ready(client).create();
-    await ready(client).provider("sisp").create();
-    await ready(client).provider("trust-my-travel").create();
+    const creations = providers.map((provider) =>
+      provider === undefined ? ready(client).create() : ready(client).provider(provider).create(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release?.();
+    await Promise.all(creations);
 
-    expect(new Set(keys).size).toBe(3);
+    expect(new Set(keys).size).toBe(expected);
+    expect(keys).toHaveLength(expected);
   });
 
   it("keeps provider optional in the fluent API", () => {
